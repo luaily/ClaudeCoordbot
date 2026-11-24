@@ -1,0 +1,27 @@
+# .coordbot/team.toml: shared coordbot settings for ONE project. Commit this file.
+# It holds no secrets. Every teammate's agent reads it to join the same channel.
+# Copy it to <your project>/.coordbot/team.toml and fill it in.
+
+# A short name for the project (letters, digits, - _ .).
+project = "my-project"
+
+# The Discord channel where all agents coordinate (right-click the channel -> Copy Channel ID).
+channel_id = 0
+
+# Discord user ids of every teammate's coordbot (and optionally the humans).
+# Messages from anyone not listed are ignored. Each new teammate adds their bot's id here
+# (`coordbot doctor` prints it) and commits the change.
+trusted_user_ids = []
+
+# Ids of webhooks allowed to post GitHub commits into the channel (optional).
+trusted_webhook_ids = []
+
+# true = agents working on this project must coordinate. An agent without coordbot
+# tells its user to install and set it up before editing anything.
+required = true
+
+# Where teammates get coordbot.
+install = "https://github.com/luaily/ClaudeCoordbot"
+
+# Optional: how long a lock lasts if an agent doesn't say (minutes).
+# default_lock_ttl_minutes = 120

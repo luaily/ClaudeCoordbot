@@ -1,13 +1,17 @@
-# coordbot settings. Copy of config.example.toml -> config.toml (setup does this for you).
+# Your PERSONAL coordbot settings: ~/.coordbot/config.toml (`coordbot setup` creates it).
 # Lines starting with # are comments. Keep the quotes around text values.
-# NEVER share this file or post it anywhere: it contains your bot's secret token.
+# NEVER share this file, commit it, or post it anywhere: it contains your bot's secret token.
+#
+# Projects that use coordbot carry a shared .coordbot/team.toml with the channel and the
+# list of trusted bots. Inside such a project those settings are used automatically,
+# so here you normally only need bot_token and agent_name.
 
 # The secret token of YOUR bot (Discord Developer Portal -> your app -> Bot -> Reset Token).
 bot_token = "PASTE_YOUR_BOT_TOKEN_HERE"
 
 # The number id of the Discord channel where everybody coordinates.
 # (Discord -> Settings -> Advanced -> Developer Mode ON, then right-click the channel -> Copy Channel ID.)
-# No quotes around the number.
+# No quotes around the number. Leave it 0 if your projects have a .coordbot/team.toml.
 channel_id = 0
 
 # The name shown in your posts, e.g. "alice-agent". Letters, digits, - _ . only.
@@ -24,7 +28,8 @@ trusted_user_ids = []
 trusted_webhook_ids = []
 
 # Where the local database file is kept. A relative path is relative to this config file.
-db_path = "coordbot.db"
+# Leave it commented out: inside a project the database is ~/.coordbot/<project>-<channel>.db
+# db_path = "coordbot.db"
 
 # How many minutes a file lock lasts if you don't say otherwise.
 # Locks expire by themselves so a crashed agent can't block others forever.
@@ -50,3 +55,8 @@ statuses = [
 # How often (in minutes) the bot picks a new random status.
 # 0 = pick one once when the bot starts and keep it. Maximum 1440 (one day).
 status_minutes = 15
+
+# The bot goes offline after this many minutes with no activity (nobody posting,
+# no commands from your agent). It comes back by itself on your agent's next command.
+# 0 = never go offline. Maximum 1440.
+idle_minutes = 10

@@ -1,4 +1,14 @@
-"""Loading and validating config.toml. Never prints or returns the token in messages."""
+"""Loading and validating settings. Never prints or returns the token in messages.
+
+Two layers:
+  * Personal config (secret, never committed): ~/.coordbot/config.toml
+    bot_token, agent_name, statuses, idle_minutes, and optionally channel/trust lists.
+  * Project team file (shared, committed): <project>/.coordbot/team.toml
+    channel_id, trusted_user_ids, trusted_webhook_ids, required, install, lock TTL.
+    Found automatically by walking up from the working directory, so a project
+    only needs a .coordbot/ folder to plug every teammate's agent into one channel.
+The team file's channel wins; trust lists are merged.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +20,13 @@ from pathlib import Path
 from typing import Any
 
 PLACEHOLDER_TOKEN = "PASTE_YOUR_BOT_TOKEN_HERE"
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.toml"
+HOME_DIR = Path.home() / ".coordbot"
+HOME_CONFIG = HOME_DIR / "config.toml"
+LEGACY_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.toml"
+DEFAULT_CONFIG_PATH = HOME_CONFIG
+TEAM_DIR = ".coordbot"
+TEAM_FILE = "team.toml"
+DEFAULT_INSTALL = "https://github.com/luaily/ClaudeCoordbot"
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
 
 
@@ -30,11 +46,94 @@ class Config:
     config_path: Path
     statuses: tuple[str, ...] = ()
     status_minutes: int = 15
+    idle_minutes: int = 10
+    team: "Team | None" = None
+
+
+@dataclass(frozen=True)
+class Team:
+    """Shared project settings from .coordbot/team.toml (no secrets)."""
+
+    path: Path
+    project: str
+    channel_id: int
+    trusted_user_ids: frozenset[int]
+    trusted_webhook_ids: frozenset[int]
+    required: bool
+    install: str
+    default_lock_ttl_minutes: int | None
+
+    @property
+    def root(self) -> Path:
+        """The project folder (the one holding .coordbot/)."""
+        return self.path.parent.parent
 
 
 def default_config_path() -> Path:
     env = os.environ.get("COORDBOT_CONFIG")
-    return Path(env) if env else DEFAULT_CONFIG_PATH
+    if env:
+        return Path(env)
+    if not HOME_CONFIG.is_file() and LEGACY_CONFIG_PATH.is_file():
+        return LEGACY_CONFIG_PATH  # older installs kept config.toml next to the tool
+    return HOME_CONFIG
+
+
+def find_team_file(start: Path | None = None) -> Path | None:
+    """Walk up from `start` (or $COORDBOT_PROJECT, or the cwd) to find .coordbot/team.toml."""
+    env = os.environ.get("COORDBOT_PROJECT")
+    here = (start or (Path(env) if env else Path.cwd())).expanduser().resolve()
+    for folder in (here, *here.parents):
+        candidate = folder / TEAM_DIR / TEAM_FILE
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _read_toml(path: Path, what: str) -> dict[str, Any]:
+    try:
+        with path.open("rb") as fh:
+            return tomllib.load(fh)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(
+            f"{what} {path} is not valid: {exc}\n"
+            "  Check that text values are in quotes and ids are plain numbers."
+        ) from None
+    except OSError as exc:
+        raise ConfigError(f"Could not read {path}: {exc.strerror or exc}") from None
+
+
+def parse_team(data: dict[str, Any], path: Path) -> Team:
+    errors: list[str] = []
+    channel_id = _as_id(data.get("channel_id"))
+    if channel_id is None:
+        errors.append("channel_id must be the coordination channel's id number")
+        channel_id = 0
+    users = _id_list(data, "trusted_user_ids", errors)
+    hooks = _id_list(data, "trusted_webhook_ids", errors)
+    project = data.get("project", path.parent.parent.name)
+    if not isinstance(project, str) or not _NAME_RE.match(project.strip() or "-"):
+        errors.append("project must be a short name (letters, digits, - _ .)")
+        project = "project"
+    required = data.get("required", False)
+    if not isinstance(required, bool):
+        errors.append("required must be true or false")
+        required = False
+    install = data.get("install", DEFAULT_INSTALL)
+    if not isinstance(install, str) or not install.startswith("https://"):
+        errors.append("install must be an https:// link to coordbot")
+        install = DEFAULT_INSTALL
+    ttl = data.get("default_lock_ttl_minutes")
+    if ttl is not None and (isinstance(ttl, bool) or not isinstance(ttl, int) or not 1 <= ttl <= 10080):
+        errors.append("default_lock_ttl_minutes must be between 1 and 10080")
+        ttl = None
+    if errors:
+        raise ConfigError(f"Problems in the team file {path}:\n" + "\n".join(f"  - {e}" for e in errors))
+    return Team(path, project.strip(), channel_id, users, hooks, required, install, ttl)
+
+
+def load_team(start: Path | None = None) -> Team | None:
+    path = find_team_file(start)
+    return parse_team(_read_toml(path, "Team file"), path) if path else None
 
 
 def _as_id(value: Any) -> int | None:
@@ -86,8 +185,21 @@ def _status_list(data: dict[str, Any], errors: list[str]) -> tuple[str, ...]:
     return tuple(out)
 
 
-def parse_config(data: dict[str, Any], config_path: Path) -> Config:
+def parse_config(data: dict[str, Any], config_path: Path, team: Team | None = None) -> Config:
     errors: list[str] = []
+    data = dict(data)
+    if team is not None:
+        # The project's shared settings: its channel wins, trust lists are merged.
+        data["channel_id"] = team.channel_id
+        for key, ids in (("trusted_user_ids", team.trusted_user_ids),
+                         ("trusted_webhook_ids", team.trusted_webhook_ids)):
+            own = data.get(key, [])
+            if isinstance(own, list):  # a bad value is left alone so validation reports it
+                data[key] = [*own, *sorted(ids)]
+        if team.default_lock_ttl_minutes and "default_lock_ttl_minutes" not in data:
+            data["default_lock_ttl_minutes"] = team.default_lock_ttl_minutes
+        if "db_path" not in data:
+            data["db_path"] = str(HOME_DIR / f"{team.project}-{team.channel_id}.db")
 
     token = data.get("bot_token")
     if not isinstance(token, str) or not token.strip():
@@ -100,7 +212,8 @@ def parse_config(data: dict[str, Any], config_path: Path) -> Config:
     channel_raw = data.get("channel_id")
     channel_id = _as_id(channel_raw)
     if channel_raw is None or channel_raw == 0:
-        errors.append("channel_id is missing: copy the channel's id from Discord (see README step 6)")
+        errors.append("channel_id is missing: copy the channel's id from Discord (see README step 6), "
+                      "or work inside a project that has a .coordbot/team.toml")
         channel_id = 0
     elif channel_id is None:
         errors.append("channel_id must be a number like 123456789012345678 (see README step 6)")
@@ -137,29 +250,25 @@ def parse_config(data: dict[str, Any], config_path: Path) -> Config:
         errors.append("status_minutes must be a whole number of minutes between 0 and 1440 (0 = pick once at startup)")
         minutes = 15
 
+    idle = data.get("idle_minutes", 10)
+    if isinstance(idle, bool) or not isinstance(idle, int) or not (0 <= idle <= 1440):
+        errors.append("idle_minutes must be a whole number of minutes between 0 and 1440 (0 = never go offline)")
+        idle = 10
+
     if errors:
         raise ConfigError(
             f"Problems in {config_path}:\n" + "\n".join(f"  - {e}" for e in errors)
         )
-    return Config(token, channel_id, agent, users, hooks, db_path, ttl, config_path, statuses, minutes)
+    return Config(token, channel_id, agent, users, hooks, db_path, ttl, config_path, statuses, minutes,
+                  idle, team)
 
 
-def load_config(path: Path | None = None) -> Config:
+def load_config(path: Path | None = None, project: Path | None = None) -> Config:
     path = (path or default_config_path()).expanduser()
     if not path.is_file():
         raise ConfigError(
-            f"Could not find {path}.\n"
-            "  Run setup-mac.command (macOS) or setup-windows.bat (Windows) first, "
-            "or copy config.example.toml to config.toml and fill it in."
+            f"Could not find your personal coordbot settings at {path}.\n"
+            "  Run `coordbot setup` (or the setup script for your computer) first."
         )
-    try:
-        with path.open("rb") as fh:
-            data = tomllib.load(fh)
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(
-            f"{path} is not valid: {exc}\n"
-            "  Check that text values are in quotes and ids are plain numbers."
-        ) from None
-    except OSError as exc:
-        raise ConfigError(f"Could not read {path}: {exc.strerror or exc}") from None
-    return parse_config(data, path)
+    data = _read_toml(path, "Config")
+    return parse_config(data, path, load_team(project))

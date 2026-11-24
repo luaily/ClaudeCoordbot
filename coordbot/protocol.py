@@ -16,7 +16,10 @@ RESERVE = 500  # room kept free for files in every chunk
 MAX_PATH_LEN = 240
 MAX_FILES = 500
 MAX_TEXT = 600
-TYPES = ("plan", "lock", "release", "done")
+TYPES = ("plan", "lock", "release", "done", "context", "git")
+CONTEXT_KINDS = ("context", "defense", "question")
+GIT_ACTIONS = ("pull", "push", "branch", "merge")
+MAX_BRANCH = 100
 ROBLOX_PREFIX = "roblox:"
 
 _BLOCK_RE = re.compile(r"```coord[ \t]*\r?\n(.*?)\r?\n?```", re.DOTALL)
@@ -33,6 +36,9 @@ class CoordEvent:
     commit: str | None
     all: bool
     ts: float
+    kind: str | None = None  # context: context | defense | question
+    action: str | None = None  # git: pull | push | branch | merge
+    branch: str | None = None  # git: branch name
 
 
 # ---------- paths ----------
@@ -76,7 +82,8 @@ def encode_block(payload: dict[str, Any]) -> str:
 
 
 def _payload(type_: str, agent: str, files: list[str], text: str, ttl: int | None,
-             commit: str | None, all_: bool, ts: float) -> dict[str, Any]:
+             commit: str | None, all_: bool, ts: float, kind: str | None = None,
+             action: str | None = None, branch: str | None = None) -> dict[str, Any]:
     d: dict[str, Any] = {
         "v": PROTOCOL_VERSION, "type": type_, "agent": agent, "id": str(uuid.uuid4()),
         "files": [_clean(f) for f in files],
@@ -88,14 +95,23 @@ def _payload(type_: str, agent: str, files: list[str], text: str, ttl: int | Non
         d["commit"] = _clean(commit)
     if all_:
         d["all"] = True
+    if kind:
+        d["kind"] = kind
+    if action:
+        d["action"] = action
+    if branch:
+        d["branch"] = _clean(branch)
     d["ts"] = int(ts)
     return d
 
 
-_ICONS = {"plan": "📝", "lock": "🔒", "release": "🔓", "done": "✅"}
+_ICONS = {"plan": "📝", "lock": "🔒", "release": "🔓", "done": "✅", "context": "💬", "git": "🔀"}
+_KIND_ICONS = {"context": "💬", "defense": "🛡️", "question": "❓"}
+_GIT_ICONS = {"pull": "⬇️", "push": "⬆️", "branch": "🌿", "merge": "🔀"}
 
 
-def _human(type_: str, agent: str, files: list[str], text: str, commit: str | None, all_: bool) -> str:
+def _human(type_: str, agent: str, files: list[str], text: str, commit: str | None, all_: bool,
+           kind: str | None = None, action: str | None = None, branch: str | None = None) -> str:
     shown = ", ".join(f"`{_one_line(f, 60)}`" for f in files[:4])
     if len(files) > 4:
         shown += f", +{len(files) - 4} more"
@@ -115,6 +131,21 @@ def _human(type_: str, agent: str, files: list[str], text: str, commit: str | No
             line += " (released all locks)"
         if commit:
             line += f" commit `{_one_line(commit, 40)}`"
+    elif type_ == "context":
+        k = kind or "context"
+        label = {"context": "context", "defense": "defends its choices", "question": "asks"}[k]
+        line = f"{_KIND_ICONS[k]} **{a}** {label}: {t}" + (f" (files: {shown})" if files else "")
+    elif type_ == "git":
+        act = action or "push"
+        verb = {"pull": "is pulling", "push": "pushed", "branch": "switched to branch",
+                "merge": "is merging"}[act]
+        line = f"{_GIT_ICONS[act]} **{a}** {verb} `{_one_line(branch or '?', 60)}`"
+        if commit:
+            line += f" at `{_one_line(commit, 40)}`"
+        if t:
+            line += f" — {t}"
+        if files:
+            line += f" (files: {shown})"
     else:
         line = f"{_ICONS['plan']} **{a}** plans: {t}" + (f" (files: {shown})" if files else "")
     return line
@@ -122,17 +153,25 @@ def _human(type_: str, agent: str, files: list[str], text: str, commit: str | No
 
 def build_messages(type_: str, agent: str, *, files: list[str] | None = None, text: str = "",
                    ttl: int | None = None, commit: str | None = None, all_: bool = False,
-                   ts: float | None = None) -> list[tuple[str, dict[str, Any]]]:
+                   ts: float | None = None, kind: str | None = None, action: str | None = None,
+                   branch: str | None = None) -> list[tuple[str, dict[str, Any]]]:
     """Return one or more (content, payload) pairs, each under the safe size limit."""
     if type_ not in TYPES:
         raise ValueError(f"unknown type {type_!r}")
+    if type_ == "context" and (kind or "context") not in CONTEXT_KINDS:
+        raise ValueError(f"unknown context kind {kind!r}")
+    if type_ == "git" and action not in GIT_ACTIONS:
+        raise ValueError(f"unknown git action {action!r}")
+    if branch is not None:
+        branch = " ".join(branch.split())[:MAX_BRANCH]
     files = list(files or [])
     ts = time.time() if ts is None else ts
     text = " ".join(text.split())[:MAX_TEXT] if text else ""
 
     def render(chunk: list[str]) -> tuple[str, dict[str, Any]]:
-        payload = _payload(type_, agent, chunk, text, ttl, commit, all_, ts)
-        return _human(type_, agent, chunk, text, commit, all_) + "\n" + encode_block(payload), payload
+        payload = _payload(type_, agent, chunk, text, ttl, commit, all_, ts, kind, action, branch)
+        human = _human(type_, agent, chunk, text, commit, all_, kind, action, branch)
+        return human + "\n" + encode_block(payload), payload
 
     while text and len(render([])[0]) > SAFE_LIMIT - RESERVE:
         text = text[: int(len(text) * 0.8)]
@@ -198,7 +237,18 @@ def parse_coord(content: str, default_ts: float = 0.0, default_ttl: int | None =
         ts = d.get("ts", default_ts)
         if isinstance(ts, bool) or not isinstance(ts, (int, float)):
             ts = default_ts
-        return CoordEvent(type_, agent, uid, tuple(files), text, ttl, commit, all_, float(ts))
+        kind = action = branch = None
+        if type_ == "context":
+            kind = d.get("kind", "context")
+            if kind not in CONTEXT_KINDS:
+                return None
+        if type_ == "git":
+            action = d.get("action")
+            if action not in GIT_ACTIONS:
+                return None
+            branch = _str(d, "branch", MAX_BRANCH + 20)
+        return CoordEvent(type_, agent, uid, tuple(files), text, ttl, commit, all_, float(ts),
+                          kind, action, branch)
     except (ValueError, TypeError, RecursionError):
         return None
 

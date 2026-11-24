@@ -94,3 +94,30 @@ def test_example_config_parses(tmp_path):
     dst.write_text(text)
     cfg = load_config(dst)
     assert 8 <= len(cfg.statuses) <= 12 and cfg.status_minutes == 15
+
+
+def test_team_file_merges(tmp_path, monkeypatch):
+    from coordbot.config import load_config
+
+    proj = tmp_path / "proj"
+    (proj / ".coordbot").mkdir(parents=True)
+    (proj / ".coordbot" / "team.toml").write_text(
+        'project = "demo"\nchannel_id = 55\ntrusted_user_ids = [7]\nrequired = true\n')
+    (proj / "src").mkdir()
+    personal = tmp_path / "config.toml"
+    personal.write_text('bot_token = "t"\nagent_name = "me"\ntrusted_user_ids = [8]\n')
+    monkeypatch.delenv("COORDBOT_PROJECT", raising=False)
+    cfg = load_config(personal, proj / "src")
+    assert cfg.channel_id == 55 and cfg.trusted_user_ids == frozenset({7, 8})
+    assert cfg.team and cfg.team.required and cfg.team.root == proj
+    assert cfg.db_path.name == "demo-55.db" and cfg.idle_minutes == 10
+
+
+def test_bad_idle(tmp_path):
+    import pytest
+
+    from coordbot.config import ConfigError, parse_config
+
+    with pytest.raises(ConfigError):
+        parse_config({"bot_token": "t", "channel_id": 1, "agent_name": "a", "idle_minutes": -1},
+                     tmp_path / "c.toml")

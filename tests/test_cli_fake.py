@@ -12,10 +12,11 @@ class Channel:
     def __init__(self):
         self.msgs, self.next = [], 1000
 
-    def add(self, author, content):
+    def add(self, author, content, reply_to=None, thread_id=None):
         self.next += 1
         rec = {"id": self.next, "author_id": author, "author_name": "n", "webhook_id": None,
-               "content": content, "embeds": [], "ts": time.time()}
+               "content": content, "embeds": [], "ts": time.time(), "reply_to": reply_to,
+               "thread_id": thread_id}
         self.msgs.append(rec)
         return rec
 
@@ -24,14 +25,27 @@ class Fake:
     def __init__(self, ch, own_id, hook=None):
         self.ch, self.own_id, self.hook = ch, own_id, hook
 
-    async def fetch(self, after):
-        return [m for m in self.ch.msgs if m["id"] > (after or 0)]
+        self.threads, self.archived = {}, []
 
-    async def send(self, content):
-        rec = self.ch.add(self.own_id, content)
+    async def fetch(self, after):
+        return [m for m in self.ch.msgs if m["id"] > (after or 0) and not m.get("thread_id")]
+
+    async def fetch_thread(self, tid, after=None):
+        return [m for m in self.ch.msgs if m.get("thread_id") == tid and m["id"] > (after or 0)]
+
+    async def send(self, content, reply_to=None, thread_id=None):
+        rec = self.ch.add(self.own_id, content, reply_to, thread_id)
         if self.hook:
             self.hook()
-        return rec
+        return dict(rec)
+
+    async def create_thread(self, message_id, name):
+        tid = message_id  # Discord: thread id == starter message id
+        self.threads[tid] = name
+        return tid
+
+    async def archive_thread(self, tid):
+        self.archived.append(tid)
 
 
 def make(tmp_path, name, own_id, ch, hook=None):
@@ -80,3 +94,36 @@ def test_lost_race_posts_release(tmp_path):
     assert run(cli.cmd_lock(a, args(files=["src/x"], reason="r", ttl=30))) == 2
     assert "release" in ch.msgs[-1]["content"]
     assert [l.author_id for l in a.db.active_locks()] == [2]
+
+
+def test_threads_replies_and_context(tmp_path):
+    ch = Channel()
+    a, b = make(tmp_path, "a", 1, ch), make(tmp_path, "b", 2, ch)
+    assert run(cli.cmd_plan(a, args(summary="build roof", files=["src/a"]))) == 0
+    tid = a.task_thread()
+    assert tid and tid in a.session.threads
+    assert run(cli.cmd_lock(a, args(files=["src/a"], reason="roof", ttl=30))) == 0
+    lock_msg = ch.msgs[-1]["id"]
+    assert a.task_thread() == tid  # one thread per task
+    assert run(cli.cmd_context(a, args(message="renamed Roof.luau", kind="context", files=[]))) == 0
+    assert ch.msgs[-1]["thread_id"] == tid
+    # another agent sees thread context through sync
+    run(b.sync())
+    assert run(cli.cmd_context(a, args(message="defended", kind="defense", files=[]))) == 0
+    assert run(cli.cmd_done(a, args(summary="ok", files=["src/a"], commit="abc", all=False))) == 0
+    assert ch.msgs[-1]["reply_to"] == lock_msg
+    assert a.session.archived == [tid] and a.task_thread() is None
+    run(b.sync())
+    assert run(cli.cmd_check(b, args(files=["src/a"]))) == 0
+    kinds = [r["kind"] for r in b.db.recent_events(("context",), 10)]
+    assert "context" in kinds
+
+
+def test_git_notice_and_status(tmp_path):
+    ch = Channel()
+    a = make(tmp_path, "a", 1, ch)
+    assert run(cli.cmd_git(a, args(action="push", branch="main", commit="abc", summary="", files=[]))) == 0
+    assert "push" in ch.msgs[-1]["content"]
+    a.capture = True
+    assert run(cli.cmd_status(a, args())) == 0
+    assert a.result["recent"][0]["action"] == "push"

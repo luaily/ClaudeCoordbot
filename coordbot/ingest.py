@@ -29,7 +29,13 @@ def ingest(db: Database, cfg: Config, rec: dict[str, Any], own_id: int | None) -
         return True
     ev = parse_coord(rec.get("content", ""), rec["ts"], cfg.default_lock_ttl_minutes)
     if ev is not None:
-        db.insert_event(rec["id"], rec["author_id"], ev, rec["ts"])
+        db.insert_event(rec["id"], rec["author_id"], ev, rec["ts"], rec.get("channel_id"))
+        if not rec.get("thread_id") and rec["author_id"] != own_id:
+            if ev.type in ("plan", "lock"):
+                # Their task thread (if any) has this message's id: watch it for context.
+                db.set_thread_if_new(rec["id"], rec["id"], rec["author_id"], rec["ts"])
+            elif ev.type in ("done", "release") and ev.all:
+                db.close_threads_of(rec["author_id"])
         if rec["author_id"] == own_id:
             db.insert_own_action(rec["id"], ev.type, ev.text, list(ev.files), ev.commit, rec["ts"])
     return True
@@ -38,7 +44,8 @@ def ingest(db: Database, cfg: Config, rec: dict[str, Any], own_id: int | None) -
 def ingest_many(db: Database, cfg: Config, recs: list[dict[str, Any]], own_id: int | None) -> int:
     kept = 0
     for rec in sorted(recs, key=lambda r: r["id"]):
-        db.bump_last_seen(rec["id"])
+        if not rec.get("thread_id"):  # thread replies have their own cursor (thread_last:<id>)
+            db.bump_last_seen(rec["id"])
         kept += ingest(db, cfg, rec, own_id)
     db.rebuild_locks(cfg.default_lock_ttl_minutes)
     return kept

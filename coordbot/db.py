@@ -27,7 +27,19 @@ CREATE TABLE IF NOT EXISTS commits (
   msg_id INTEGER, raw TEXT, PRIMARY KEY (sha, branch));
 CREATE TABLE IF NOT EXISTS own_actions (
   msg_id INTEGER PRIMARY KEY, type TEXT, summary TEXT, files TEXT, commit_sha TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS threads (
+  root_msg_id INTEGER PRIMARY KEY, thread_id INTEGER, author_id INTEGER, ts REAL, closed INTEGER DEFAULT 0);
 """
+
+# Columns added after the first release; added to older databases on open.
+MIGRATIONS = [
+    ("events", "kind", "TEXT"),
+    ("events", "action", "TEXT"),
+    ("events", "branch", "TEXT"),
+    ("events", "channel_id", "INTEGER"),
+    ("messages", "channel_id", "INTEGER"),
+    ("messages", "thread_id", "INTEGER"),
+]
 
 
 @dataclass(frozen=True)
@@ -51,6 +63,11 @@ class Database:
         except sqlite3.DatabaseError:
             pass
         self.conn.executescript(SCHEMA)
+        for table, column, kind in MIGRATIONS:
+            cols = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                with self.conn:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
 
     def close(self) -> None:
         self.conn.close()
@@ -77,17 +94,28 @@ class Database:
     def insert_message(self, rec: dict[str, Any]) -> bool:
         with self.conn:
             cur = self.conn.execute(
-                "INSERT OR IGNORE INTO messages VALUES (?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO messages (id, author_id, author_name, webhook_id, content, embeds, ts,"
+                " channel_id, thread_id) VALUES (?,?,?,?,?,?,?,?,?)",
                 (rec["id"], rec["author_id"], rec["author_name"], rec.get("webhook_id"),
-                 rec.get("content", ""), json.dumps(rec.get("embeds", [])), rec["ts"]))
+                 rec.get("content", ""), json.dumps(rec.get("embeds", [])), rec["ts"],
+                 rec.get("channel_id"), rec.get("thread_id")))
+            if rec.get("thread_id"):
+                # A thread started from a message has that message's id.
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO threads (root_msg_id, thread_id, author_id, ts) VALUES (?,?,?,?)",
+                    (rec["thread_id"], rec["thread_id"], rec["author_id"], rec["ts"]))
         return cur.rowcount > 0
 
-    def insert_event(self, msg_id: int, author_id: int, ev: Any, ts: float) -> None:
+    def insert_event(self, msg_id: int, author_id: int, ev: Any, ts: float,
+                     channel_id: int | None = None) -> None:
         with self.conn:
             self.conn.execute(
-                "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO events (msg_id, author_id, agent, type, uid, files, text, ttl,"
+                " commit_sha, all_flag, ts, kind, action, branch, channel_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (msg_id, author_id, ev.agent, ev.type, ev.id, json.dumps(list(ev.files)), ev.text,
-                 ev.ttl, ev.commit, int(ev.all), ts))
+                 ev.ttl, ev.commit, int(ev.all), ts, getattr(ev, "kind", None),
+                 getattr(ev, "action", None), getattr(ev, "branch", None), channel_id))
 
     def insert_commit(self, c: Any, ts: float, msg_id: int, raw: dict[str, Any]) -> None:
         with self.conn:
@@ -136,6 +164,36 @@ class Database:
         rows = self.conn.execute("SELECT * FROM commits ORDER BY msg_id DESC, ts DESC LIMIT ?", (n,)).fetchall()
         return [CommitRow(r["sha"], r["branch"], r["repo"], r["message"], r["author"], r["url"], r["ts"])
                 for r in rows]
+
+    # threads
+    def set_thread(self, root_msg_id: int, thread_id: int, author_id: int) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO threads (root_msg_id, thread_id, author_id, ts, closed)"
+                " VALUES (?,?,?,?,0)", (root_msg_id, thread_id, author_id, time.time()))
+
+    def set_thread_if_new(self, root_msg_id: int, thread_id: int, author_id: int, ts: float) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO threads (root_msg_id, thread_id, author_id, ts, closed)"
+                " VALUES (?,?,?,?,0)", (root_msg_id, thread_id, author_id, ts))
+
+    def thread_for(self, root_msg_id: int) -> int | None:
+        r = self.conn.execute("SELECT thread_id FROM threads WHERE root_msg_id=?", (root_msg_id,)).fetchone()
+        return int(r["thread_id"]) if r and r["thread_id"] else None
+
+    def close_thread(self, thread_id: int) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE threads SET closed=1 WHERE thread_id=?", (thread_id,))
+
+    def close_threads_of(self, author_id: int) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE threads SET closed=1 WHERE author_id=?", (author_id,))
+
+    def open_thread_ids(self, max_age_s: float = 86400, limit: int = 20) -> list[int]:
+        rows = self.conn.execute("SELECT thread_id FROM threads WHERE closed=0 AND ts > ?"
+                                 " ORDER BY ts DESC LIMIT ?", (time.time() - max_age_s, limit)).fetchall()
+        return [int(r["thread_id"]) for r in rows if r["thread_id"]]
 
     def own_actions(self, limit: int) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM own_actions ORDER BY msg_id DESC LIMIT ?", (limit,)).fetchall()

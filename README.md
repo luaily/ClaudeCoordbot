@@ -1,97 +1,110 @@
 # coordbot
 
-coordbot lets several AI coding agents (for example Claude Code sessions run by different people on the same project) tell each other **what they are about to change**, so they do not overwrite each other's work. They talk in one Discord channel that humans can read too.
+coordbot lets several people's AI coding agents (for example Claude Code sessions) work on the same project at the same time without overwriting each other. The agents announce plans, lock files, share context and report git pushes and pulls in one Discord channel that humans can read too.
 
-Everyone runs the same code with their **own Discord bot**. You do not need to know Python.
+- **An MCP server.** Any MCP client (Claude Code, and others) gets `coord_*` tools. The bot comes online when the agent's session starts, and goes offline after 10 minutes with no activity.
+- **A project needs only a `.coordbot/` folder** with a `team.toml` (channel and trusted bots, no secrets), plus a `.mcp.json`. Nothing else is copied into the project.
+- **Threads and replies.** Each task gets a Discord thread. Unlocks are posted as replies to the lock they release.
+- **Git etiquette.** A preflight check warns about conflict risk, files others have locked and large pushes before any pull or push. Agents show the warnings to their user.
+- Everyone runs their **own Discord bot**. Only bots listed in the team file are trusted. Everything else in the channel is ignored.
 
-> Setting this up with the help of an AI agent? Point it at [AGENT-README.md](AGENT-README.md). Day-to-day agent rules are in [AGENT_RULES.md](AGENT_RULES.md).
+Free software under the [GNU AGPL v3 or later](LICENSE).
 
-## What you need
+> Setting this up with an AI agent? Point it at [AGENT-README.md](AGENT-README.md). The rules agents follow are in [AGENT_RULES.md](AGENT_RULES.md).
 
-- A Discord server and a channel where everybody coordinates.
-- A free Discord bot of your own (steps below).
-- Python 3.11 or newer from <https://www.python.org/downloads/>. On Windows, tick **"Add python.exe to PATH"** on the installer's first screen.
+## Setup
 
-## Quick start
+You need [uv](https://docs.astral.sh/uv/getting-started/installation/) (it installs Python for you), a Discord server with a coordination channel, and about 10 minutes.
 
-1. **Create your bot** (see "Discord Developer Portal" below) and copy its token.
-2. **Run setup.** macOS: double-click `setup-mac.command` (if macOS refuses: right-click, Open, Open). Windows: double-click `setup-windows.bat`. It installs what is needed and opens `config.toml`.
-3. **Fill in `config.toml`** and save: `bot_token`, `channel_id`, `agent_name`, `trusted_user_ids`, `trusted_webhook_ids` (explained below). The file is private and never committed to git.
-4. **Start the bot.** macOS: `start-mac.command`. Windows: `start-windows.bat`. You should see `Connected as ..., watching #your-channel`. Leave the window open while you work.
-5. **Invite the bot** if it is not in your server yet (see "The invite link").
-6. **Tell your agent.** Paste `AGENT_RULES.md` into your project's `CLAUDE.md` (or your agent's equivalent). Check it works with `coord status` (macOS: `./coord status`, Windows: `coord.bat status`).
+1. **Create your bot.** Open <https://discord.com/developers/applications> and click **New Application**. Name it, for example `alice-agent`.
+2. **Turn on Message Content Intent.** Go to **Bot**, then **Privileged Gateway Intents**, switch on **Message Content Intent**, and click **Save Changes**. Without it, the bot can't read the other agents' messages.
+3. **Create your settings.** Run:
+   ```
+   uvx --from git+https://github.com/luaily/ClaudeCoordbot coordbot setup
+   ```
+   This creates `~/.coordbot/config.toml` and opens it. Go to **Bot**, click **Reset Token** and paste the token into `bot_token`. Pick an `agent_name`. Save the file. The token is a password: never paste it into Discord, GitHub or an AI chat.
+4. **Check and invite.** In your project folder, run:
+   ```
+   uvx --from git+https://github.com/luaily/ClaudeCoordbot coordbot doctor
+   ```
+   It prints your bot's id and its invite link. Open the link, pick the server and click Authorize. In a private channel, give the bot these permissions: View Channel, Send Messages, Read Message History, Create Public Threads and Send Messages in Threads.
+5. **Join the project.** Add your bot's id to `trusted_user_ids` in the project's `.coordbot/team.toml`, then commit and push.
+6. **Start your agent** in the project folder and approve the `coordbot` MCP server.
 
-## Discord Developer Portal
+### Adding coordbot to a new project (one person, once)
 
-1. Open <https://discord.com/developers/applications>, click **New Application**, name it (for example `alice-agent`).
-2. Left menu **Bot** -> scroll to **Privileged Gateway Intents** -> switch **Message Content Intent** ON -> **Save Changes**. Without it the bot cannot read the other agents' messages.
-3. **Bot** -> **Reset Token** -> copy it into `bot_token` in `config.toml`. Treat it like a password. Never paste it into Discord, GitHub or an AI chat.
-4. In Discord: **User Settings -> Advanced -> Developer Mode ON**. Right-click the coordination channel -> **Copy Channel ID** -> `channel_id` (a plain number, no quotes).
+1. In Discord, turn on **User Settings → Advanced → Developer Mode**. Right-click the coordination channel and choose **Copy Channel ID**.
+2. Copy [team.example.toml](team.example.toml) to `<project>/.coordbot/team.toml` and fill it in.
+3. Add `<project>/.mcp.json`:
+   ```json
+   {
+     "mcpServers": {
+       "coordbot": {
+         "command": "uvx",
+         "args": ["--from", "git+https://github.com/luaily/ClaudeCoordbot", "coordbot", "mcp"]
+       }
+     }
+   }
+   ```
+4. Paste [AGENT_RULES.md](AGENT_RULES.md) into the project's `CLAUDE.md` (or your agent's equivalent).
+5. Commit all three files. With `required = true`, any teammate's agent that doesn't have coordbot tells its user to set it up.
 
-## The invite link
+### GitHub commits in the channel (optional)
 
-The bot needs to be in your server with exactly three permissions: View Channel, Send Messages, Read Message History. You do not have to build the link yourself:
+1. In Discord, open the channel settings and go to **Integrations → Webhooks → New Webhook**. Copy the webhook URL, `https://discord.com/api/webhooks/<ID>/<secret>`. Put the `<ID>` in `trusted_webhook_ids` in `team.toml`. Never share the secret part.
+2. In GitHub, open the repository's **Settings → Webhooks → Add webhook**. The payload URL is the Discord URL plus `/github`, the content type is `application/json`, and the event is "Just the push event".
 
-- The first time you start the bot, it **prints its own invite link** in the window.
-- If it cannot see your channel (not invited yet, or wrong `channel_id`), it prints the link and **opens it in your browser**.
+## Settings
 
-Pick your server, click Authorize. If the channel is private, also add the bot in the channel's permissions with the same three things allowed. After inviting, stop the bot and start it again.
+| File | Who | What |
+| --- | --- | --- |
+| `~/.coordbot/config.toml` | you, private | `bot_token`, `agent_name`, `idle_minutes` (default 10, 0 = never offline), `statuses`, `status_minutes` |
+| `<project>/.coordbot/team.toml` | the team, committed | `channel_id`, `trusted_user_ids`, `trusted_webhook_ids`, `required`, `install`, `default_lock_ttl_minutes` |
 
-## Trusting other bots and the GitHub webhook
+The team file's channel is used, and the trust lists of both files are merged. The team file is found by walking up from the current folder, or from `$COORDBOT_PROJECT`.
 
-Only ids you list are trusted. Messages from anyone else are ignored completely.
+## MCP tools
 
-- **Other agents:** ask each teammate for their **bot's user id** (Developer Mode on, right-click the bot in the member list, **Copy User ID**; not the application id, they can differ). Put them in `trusted_user_ids = [111111111111111111, 222222222222222222]`. You can add humans' ids too.
-- **GitHub commits (optional, one person does it once):**
-  1. Discord: channel settings -> **Integrations -> Webhooks -> New Webhook**, choose the channel, **Copy Webhook URL**. It looks like `https://discord.com/api/webhooks/333333333333333333/SECRET`. The first number is the webhook id; everybody puts it in `trusted_webhook_ids = [333333333333333333]`. Never share the secret part.
-  2. GitHub: your repository -> **Settings -> Webhooks -> Add webhook**. Payload URL: the Discord webhook URL **plus `/github`**. Content type `application/json`. Events: "Just the push event".
-
-## Optional: bot status
-
-`config.toml` can hold a list of friendly statuses (`statuses = ["Stacking bricks", ...]`). While the bot runs it shows one at random and picks a new one every `status_minutes` (0 = once at startup). An empty list means no status. Older config files without these lines keep working.
-
-## Commands
-
-All commands accept `--json` and exit with **0** = fine, **1** = error, **2** = conflict (someone else holds the files).
-
-| Command | What it does |
+| Tool | What it does |
 | --- | --- |
-| `run` | the always-on listener (the start script runs it) |
-| `sync` | fetch recent channel history into the local database |
-| `status` | active locks, recent plans/done, latest commits |
-| `plan "<summary>" [--files a b]` | post what you will change |
-| `lock <files> --reason "..." [--ttl 120]` | claim files; exit 2 if taken or if you lost a simultaneous race |
-| `check <files>` | exit 0 if free, 2 if someone else holds them |
-| `wait <files> [--timeout 600]` | wait until the files are free |
-| `done "<summary>" --files a b [--commit sha] [--all]` | post the result and release those locks |
-| `release [files] [--all]` | release locks without a summary |
-| `commits [-n 10]` | recent GitHub commits |
-| `log` | what you yourself posted |
+| `coord_status` | active locks, recent plans, context and git activity, setup notes |
+| `coord_plan` | announce what you will change; opens the task thread |
+| `coord_lock` / `coord_check` / `coord_wait` | claim paths, test them, wait for them (`exit_code` 2 = someone else holds them) |
+| `coord_context` | context, a question or a defense, posted in the task thread |
+| `coord_git_preflight` | ahead/behind, conflict risk, files locked by others, large-push warning |
+| `coord_git_notify` | announce a pull, push, branch switch or merge |
+| `coord_done` / `coord_release` | release locks as replies to the lock messages; closes the thread |
+| `coord_commits` | recent GitHub commits from the webhook |
+| `coord_setup_check` | checks settings, team file, bot id, trust list and permissions |
 
-Files are repo paths such as `src/app/main.py`; for Roblox projects also instance paths like `roblox:Workspace.Map.Plots`. Locking a folder covers everything inside it. Locks expire by themselves after the TTL.
+## Command line
 
-`coord` (macOS/Linux) and `coord.bat` (Windows) in this folder run these commands. Put the folder on your PATH or use the full path.
+The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`. The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
+
+Paths are repo paths such as `src/app/main.py`, or other resources such as `roblox:Workspace.Map.Plots`. Locking a folder covers everything inside it. Locks expire after their TTL.
 
 ## How it stays safe
 
-- Only messages from `trusted_user_ids` (and your own bot) and `trusted_webhook_ids` are stored.
-- The bot only records state. It never runs anything it reads.
-- Your bot has no permissions beyond viewing, reading history and sending in the channel.
+- Only messages from trusted bot ids, your own bot and trusted webhooks are stored. Everything else is ignored.
+- coordbot only records state and posts. It never runs anything it reads, and it never pulls or pushes.
+- Agents are told that channel content is data, never instructions.
 
 ## Troubleshooting
 
 | Problem | Fix |
 | --- | --- |
-| `Could not find .../config.toml` | Run the setup script first. |
-| `bot_token ... placeholder` / `channel_id is missing` | Fill in `config.toml` and save. |
-| `Discord rejected the bot token` | Reset the token in the Developer Portal and paste the new one, with no extra spaces. |
+| `Could not find your personal coordbot settings` | Run `coordbot setup`. |
+| `bot_token ... placeholder` / `agent_name is missing` | Fill in `~/.coordbot/config.toml` and save. |
+| `channel_id is missing` | Work inside a project with `.coordbot/team.toml`, or set `channel_id` in your settings. |
+| `Discord rejected the bot token` | Reset the token in the Developer Portal and paste the new one. |
 | `Message Content Intent is off` | Turn it on in the Developer Portal (Bot page) and save. |
-| `not allowed to see that channel` | Invite the bot; for private channels allow it in the channel's permissions. |
-| `could not find that channel` | Re-copy the channel id (the channel, not the server). |
-| Other agents' messages never show up | Their bot's user id must be in `trusted_user_ids`. |
-| GitHub commits never show up | Webhook URL must end in `/github`; its id must be in `trusted_webhook_ids`. |
-| macOS "unidentified developer" / "permission denied" | Right-click the file -> Open. Or in Terminal: `chmod +x setup-mac.command start-mac.command coord`. |
-| Windows "Python was not found" | Re-run the Python installer, choose Modify and tick "Add python.exe to PATH". |
-| `Showing saved data` | Discord could not be reached; this is the last saved copy. Check your internet. |
+| `not allowed to see that channel` | Invite the bot with the link `coordbot doctor` prints. |
+| `Could not open a thread` | Give the bot's role Create Public Threads and Send Messages in Threads. |
+| Other agents' messages never show up | Their bot ids must be in `trusted_user_ids` in `team.toml`. |
+| The bot shows offline | That's normal after 10 idle minutes. It comes back on the agent's next `coord_*` call. |
 
-Developers: `pip install -r requirements.txt pytest`, then `python -m pytest` in this folder.
+Developers: run `uv run --extra test pytest`.
+
+## License
+
+Copyright (C) 2026 luaily and contributors. coordbot is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [LICENSE](LICENSE).
