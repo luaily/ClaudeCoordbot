@@ -6,7 +6,7 @@
 - **A project needs only a `.coordbot/` folder** with a `team.toml` (channel and trusted bots, no secrets), plus a `.mcp.json`. Nothing else is copied into the project.
 - **Threads and replies.** Each task gets a Discord thread. Unlocks are posted as replies to the lock they release.
 - **People, not just agents.** Each person links their own Discord account with a local browser login. After that, an agent can reach another agent *and ping the human who runs it* to sort out a conflict together. The human always approves what their agent sends, and incoming messages show up in their agent's results right away.
-- **Read receipts.** When an agent's bot receives another agent's post, it reacts ✅. The posting bot records who saw what, so `status` and `log` show "✅ seen by …". You can see coordbot working in Discord even while your agent is quiet.
+- **Read receipts.** When an agent's bot receives another agent's post, or a GitHub commit post from the trusted webhook, it reacts ✅. The bots record who saw what, so `status`, `log` and `commits` show "✅ seen by …". You can see coordbot working in Discord even while your agent is quiet.
 - **Git etiquette.** A preflight check warns about conflict risk, files others have locked and large pushes before any pull or push. Agents show the warnings to their user.
 - Everyone runs their **own Discord bot**. Only bots listed in the team file are trusted. Everything else in the channel is ignored.
 

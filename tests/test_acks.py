@@ -53,3 +53,22 @@ def test_record_ack_only_on_our_posts(tmp_path):
     assert db.acks_for([20]) == {20: ["b", "Bob"]}
     db.remove_ack(20, 2)
     assert db.acks_for([20]) == {20: ["Bob"]}
+
+
+EMBED = {"title": "[repo:main] 1 new commit",
+         "description": "[`abc1234`](https://github.com/x/y/commit/abc1234) Fix roof - alice"}
+
+
+def test_webhook_commit_posts_are_acked_and_recorded(tmp_path):
+    team = Team(tmp_path / "t.toml", "p", 1, frozenset(), frozenset({77}), True, "https://x", None,
+                (Member("a", 1, 101, "Alice"), Member("b", 2, 202, "Bob")))
+    cfg = parse_config({"bot_token": "x", "agent_name": "a"}, tmp_path / "c.toml", team)
+    db = Database(tmp_path / "a.db")
+    hook = rec(30, 77, "", webhook_id=77, embeds=[EMBED])
+    ingest(db, cfg, hook, 1)
+    assert should_ack(db, cfg, hook, 1)
+    assert not should_ack(db, cfg, rec(31, 77, "", webhook_id=77, embeds=[{"title": "hi"}]), 1)  # no commits
+    assert not should_ack(db, cfg, rec(32, 88, "", webhook_id=88, embeds=[EMBED]), 1)  # untrusted webhook
+    assert record_ack(db, cfg, 1, 30, 2, ACK)  # another agent saw the push
+    [c] = db.recent_commits(5)
+    assert c.msg_id == 30 and db.acks_for([30]) == {30: ["b"]}

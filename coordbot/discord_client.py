@@ -204,7 +204,8 @@ class _ChannelOps:
         from .ingest import ACK, record_ack
 
         added = 0
-        for m in db.own_recent_messages(own_id, limit=limit):
+        recent = db.own_recent_messages(own_id, limit=limit) + db.recent_webhook_messages(cfg.trusted_webhook_ids)
+        for m in recent:
             try:
                 where = self.client.get_partial_messageable(m["thread_id"] or m["channel_id"] or cfg.channel_id)
                 msg = await where.fetch_message(m["id"])

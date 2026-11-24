@@ -77,11 +77,14 @@ ACK_MAX_AGE_S = 15 * 60  # never acknowledge old history (e.g. on startup)
 
 
 def should_ack(db: Database, cfg: Config, rec: dict[str, Any], own_id: int | None) -> bool:
-    """A read receipt for a trusted agent's coord message, or a linked human's message meant for us."""
-    if rec["author_id"] == own_id or rec.get("webhook_id") or not is_trusted(cfg, rec, own_id):
+    """A read receipt for a trusted agent's coord message, a trusted GitHub webhook's commit post,
+    or a linked human's message meant for us."""
+    if rec["author_id"] == own_id or not is_trusted(cfg, rec, own_id):
         return False
     if time.time() - rec["ts"] > ACK_MAX_AGE_S or db.ack_sent(rec["id"]):
         return False
+    if rec.get("webhook_id"):  # trusted webhook: acknowledge posts that carry commits
+        return any(parse_github_embed(e) for e in rec.get("embeds", []))
     if parse_coord(rec.get("content", "")) is not None:
         return True
     return db.inbox_item(rec["id"]) is not None
@@ -98,11 +101,14 @@ def acker_name(db: Database, cfg: Config, user_id: int) -> str:
 
 
 def record_ack(db: Database, cfg: Config, own_id: int, msg_id: int, user_id: int, emoji: str) -> bool:
-    """Someone reacted: keep it if it is a ✅ from a trusted account on one of our messages."""
+    """Someone reacted: keep it if it is a ✅ from a trusted account on one of our messages,
+    or on a trusted GitHub webhook's commit post (so everyone sees which agents saw a push)."""
     if emoji != ACK or user_id == own_id or user_id not in cfg.trusted_user_ids:
         return False
     msg = db.message(msg_id)
-    if msg is None or msg["author_id"] != own_id:
+    if msg is None:
+        return False
+    if msg["author_id"] != own_id and msg["webhook_id"] not in cfg.trusted_webhook_ids:
         return False
     return db.add_ack(msg_id, user_id, acker_name(db, cfg, user_id))
 

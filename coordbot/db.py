@@ -60,6 +60,7 @@ class CommitRow:
     author: str
     url: str
     ts: float
+    msg_id: int = 0  # the webhook message that carried it (for ✅ acknowledgements)
 
 
 class Database:
@@ -172,8 +173,8 @@ class Database:
 
     def recent_commits(self, n: int) -> list[CommitRow]:
         rows = self.conn.execute("SELECT * FROM commits ORDER BY msg_id DESC, ts DESC LIMIT ?", (n,)).fetchall()
-        return [CommitRow(r["sha"], r["branch"], r["repo"], r["message"], r["author"], r["url"], r["ts"])
-                for r in rows]
+        return [CommitRow(r["sha"], r["branch"], r["repo"], r["message"], r["author"], r["url"], r["ts"],
+                          int(r["msg_id"] or 0)) for r in rows]
 
     # threads
     def set_thread(self, root_msg_id: int, thread_id: int, author_id: int) -> None:
@@ -269,6 +270,16 @@ class Database:
     def own_recent_messages(self, own_id: int, max_age_s: float = 86400, limit: int = 10) -> list[dict[str, Any]]:
         rows = self.conn.execute("SELECT id, channel_id, thread_id FROM messages WHERE author_id=? AND ts > ?"
                                  " ORDER BY id DESC LIMIT ?", (own_id, time.time() - max_age_s, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def recent_webhook_messages(self, webhook_ids: frozenset[int], max_age_s: float = 86400,
+                                limit: int = 5) -> list[dict[str, Any]]:
+        if not webhook_ids:
+            return []
+        q = ",".join("?" * len(webhook_ids))
+        rows = self.conn.execute(f"SELECT id, channel_id, thread_id FROM messages WHERE webhook_id IN ({q})"
+                                 " AND ts > ? ORDER BY id DESC LIMIT ?",
+                                 (*webhook_ids, time.time() - max_age_s, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def agent_name_of(self, author_id: int) -> str | None:

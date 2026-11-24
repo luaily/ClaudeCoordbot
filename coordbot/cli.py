@@ -449,10 +449,14 @@ async def cmd_status(ctx: Ctx, args: argparse.Namespace) -> int:
         if e["type"] == "git":
             label = f"git {e['action']} {e['branch'] or ''}".strip()
         lines.append(f"  [{label}] {e['agent']} {ago(e['ts'], now)}: {e['text']}{extra}")
-    lines.append("Latest commits:" if commits else "Latest commits: none seen")
-    for c in commits:
-        lines.append(f"  {c.sha[:7]} {c.message} - {c.author} ({c.branch}) {ago(c.ts, now)}")
     await ctx.refresh_acks()
+    lines.append("Latest commits:" if commits else "Latest commits: none seen")
+    commit_acks = ctx.db.acks_for([c.msg_id for c in commits if c.msg_id])
+    for i, c in enumerate(commits):
+        seen = commit_acks.get(c.msg_id, [])
+        data["commits"][i]["seen_by"] = seen
+        lines.append(f"  {c.sha[:7]} {c.message} - {c.author} ({c.branch}) {ago(c.ts, now)}"
+                     + (f" (✅ {', '.join(seen)})" if seen else ""))
     own = ctx.db.own_actions(5)
     if own:
         lines.append("Your recent posts (✅ = another agent's bot received it):")
@@ -484,10 +488,13 @@ def setup_notes(cfg: Config, own_id: int) -> list[str]:
 
 async def cmd_commits(ctx: Ctx, args: argparse.Namespace) -> int:
     now = time.time()
+    await ctx.refresh_acks()
     commits = ctx.db.recent_commits(args.n)
+    acks = ctx.db.acks_for([c.msg_id for c in commits if c.msg_id])
     text = "\n".join(f"{c.sha[:7]} {c.message} - {c.author} ({c.repo}:{c.branch}) {ago(c.ts, now)}"
+                     + (f" (✅ {', '.join(acks[c.msg_id])})" if acks.get(c.msg_id) else "")
                      for c in commits) or "No GitHub commits seen yet."
-    ctx.emit({"ok": True, "commits": [c.__dict__ for c in commits]}, text)
+    ctx.emit({"ok": True, "commits": [c.__dict__ | {"seen_by": acks.get(c.msg_id, [])} for c in commits]}, text)
     return OK
 
 
