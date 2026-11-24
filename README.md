@@ -1,122 +1,62 @@
 # coordbot
 
-A small helper that lets several AI coding agents (Claude Code sessions run by different people on the
-same project) tell each other **what they are about to change**, so they do not overwrite each
-other's work. They talk in one Discord channel. Humans can read that channel too.
+coordbot lets several AI coding agents (for example Claude Code sessions run by different people on the same project) tell each other **what they are about to change**, so they do not overwrite each other's work. They talk in one Discord channel that humans can read too.
 
-Every person runs the same code with their **own Discord bot**.
+Everyone runs the same code with their **own Discord bot**. You do not need to know Python.
 
-You do not need to know Python. You will double-click one setup file, edit one settings file, and double-click one start file.
+> Setting this up with the help of an AI agent? Point it at [AGENT-README.md](AGENT-README.md). Day-to-day agent rules are in [AGENT_RULES.md](AGENT_RULES.md).
 
----
+## What you need
 
-## Step 1. Install Python (once)
+- A Discord server and a channel where everybody coordinates.
+- A free Discord bot of your own (steps below).
+- Python 3.11 or newer from <https://www.python.org/downloads/>. On Windows, tick **"Add python.exe to PATH"** on the installer's first screen.
 
-1. Go to <https://www.python.org/downloads/> and download Python (version 3.11 or newer).
-2. Run the installer.
-   - **Windows:** on the first screen tick **"Add python.exe to PATH"** before clicking Install.
-   - **macOS:** just click through the installer.
+## Quick start
 
-## Step 2. Create your Discord bot
+1. **Create your bot** (see "Discord Developer Portal" below) and copy its token.
+2. **Run setup.** macOS: double-click `setup-mac.command` (if macOS refuses: right-click, Open, Open). Windows: double-click `setup-windows.bat`. It installs what is needed and opens `config.toml`.
+3. **Fill in `config.toml`** and save: `bot_token`, `channel_id`, `agent_name`, `trusted_user_ids`, `trusted_webhook_ids` (explained below). The file is private and never committed to git.
+4. **Start the bot.** macOS: `start-mac.command`. Windows: `start-windows.bat`. You should see `Connected as ..., watching #your-channel`. Leave the window open while you work.
+5. **Invite the bot** if it is not in your server yet (see "The invite link").
+6. **Tell your agent.** Paste `AGENT_RULES.md` into your project's `CLAUDE.md` (or your agent's equivalent). Check it works with `coord status` (macOS: `./coord status`, Windows: `coord.bat status`).
 
-1. Open <https://discord.com/developers/applications> and log in.
-2. Click **New Application**, give it a name like `alice-agent`, click Create.
-3. In the left menu click **Bot**.
+## Discord Developer Portal
 
-## Step 3. Turn on the Message Content Intent
+1. Open <https://discord.com/developers/applications>, click **New Application**, name it (for example `alice-agent`).
+2. Left menu **Bot** -> scroll to **Privileged Gateway Intents** -> switch **Message Content Intent** ON -> **Save Changes**. Without it the bot cannot read the other agents' messages.
+3. **Bot** -> **Reset Token** -> copy it into `bot_token` in `config.toml`. Treat it like a password. Never paste it into Discord, GitHub or an AI chat.
+4. In Discord: **User Settings -> Advanced -> Developer Mode ON**. Right-click the coordination channel -> **Copy Channel ID** -> `channel_id` (a plain number, no quotes).
 
-Still on the **Bot** page, scroll to **Privileged Gateway Intents** and switch **Message Content Intent** ON. Click **Save Changes**.
-(Without this the bot can not read what the others wrote.)
+## The invite link
 
-## Step 4. Invite the bot to your Discord server
+The bot needs to be in your server with exactly three permissions: View Channel, Send Messages, Read Message History. You do not have to build the link yourself:
 
-Use this link. Replace `YOUR_APP_ID` with the **Application ID** (Developer Portal -> your app -> General Information -> Application ID):
+- The first time you start the bot, it **prints its own invite link** in the window.
+- If it cannot see your channel (not invited yet, or wrong `channel_id`), it prints the link and **opens it in your browser**.
 
-```
-https://discord.com/oauth2/authorize?client_id=YOUR_APP_ID&permissions=68608&scope=bot
-```
+Pick your server, click Authorize. If the channel is private, also add the bot in the channel's permissions with the same three things allowed. After inviting, stop the bot and start it again.
 
-`68608` means exactly three permissions: **View Channel**, **Send Messages**, **Read Message History**. Nothing else.
-(If you prefer the menu: OAuth2 -> URL Generator -> tick scope `bot` -> tick those three permissions -> open the generated URL.)
+## Trusting other bots and the GitHub webhook
 
-**Shortcut:** you can skip building this link. The first time you start the bot, it prints its own invite link in the window. If the bot can't see your channel yet, it also opens the link in your browser.
-Pick your server and click Authorize. If the coordination channel is private, add the bot to that channel too (channel settings -> Permissions -> add the bot, allow the same three things).
+Only ids you list are trusted. Messages from anyone else are ignored completely.
 
-## Step 5. Copy your bot token
+- **Other agents:** ask each teammate for their **bot's user id** (Developer Mode on, right-click the bot in the member list, **Copy User ID**; not the application id, they can differ). Put them in `trusted_user_ids = [111111111111111111, 222222222222222222]`. You can add humans' ids too.
+- **GitHub commits (optional, one person does it once):**
+  1. Discord: channel settings -> **Integrations -> Webhooks -> New Webhook**, choose the channel, **Copy Webhook URL**. It looks like `https://discord.com/api/webhooks/333333333333333333/SECRET`. The first number is the webhook id; everybody puts it in `trusted_webhook_ids = [333333333333333333]`. Never share the secret part.
+  2. GitHub: your repository -> **Settings -> Webhooks -> Add webhook**. Payload URL: the Discord webhook URL **plus `/github`**. Content type `application/json`. Events: "Just the push event".
 
-Developer Portal -> your app -> **Bot** -> **Reset Token** -> copy it. Keep it secret like a password: anyone with it can act as your bot. Never paste it in Discord, GitHub, or into an AI chat.
+## Optional: bot status
 
-## Step 6. Copy the channel id (and turn on Developer Mode)
-
-1. In Discord: **User Settings -> Advanced -> Developer Mode: ON**.
-2. Right-click the coordination channel -> **Copy Channel ID**.
-
-## Step 7. Find the other bots' ids
-
-Ask each teammate for their **bot's user id** (Developer Mode on, right-click their bot in the member list -> **Copy User ID**). You can also add the humans' ids if you want to see their messages. Every person does this for everyone else.
-Only ids you list are trusted: messages from anyone else are ignored completely.
-
-## Step 8. GitHub commits in the channel (optional, one person does it once)
-
-1. In Discord: channel settings -> **Integrations -> Webhooks -> New Webhook**. Name it `github`, choose the channel, click **Copy Webhook URL**.
-   It looks like `https://discord.com/api/webhooks/333333333333333333/SECRETPART`.
-   The **first number (333333333333333333) is the webhook id**. Everybody puts that number in `trusted_webhook_ids`. Never share the secret part.
-2. On GitHub: your repository -> **Settings -> Webhooks -> Add webhook**.
-   - Payload URL: the Discord webhook URL **plus `/github`** at the end.
-   - Content type: `application/json`.
-   - Events: "Just the push event".
-3. Push a commit; it appears in the channel and `coord commits` shows it.
-
-## Step 9. Run setup
-
-- **macOS:** double-click `setup-mac.command`. (If macOS refuses: right-click -> Open -> Open.)
-- **Windows:** double-click `setup-windows.bat`.
-
-It installs what is needed and opens `config.toml` in your text editor.
-
-## Step 10. Fill in `config.toml`
-
-| Setting | What to put |
-| --- | --- |
-| `bot_token` | the token from step 5 (between the quotes) |
-| `channel_id` | the number from step 6 (no quotes) |
-| `agent_name` | your name in posts, e.g. `"alice-agent"` |
-| `trusted_user_ids` | list from step 7, e.g. `[111111111111111111, 222222222222222222]` |
-| `trusted_webhook_ids` | the webhook id from step 8, e.g. `[333333333333333333]` |
-| `db_path` | leave as is |
-| `default_lock_ttl_minutes` | leave as is (locks expire after this long) |
-
-Save the file. `config.toml` is private and is never committed to git.
-
-## Step 11. Start it
-
-- **macOS:** double-click `start-mac.command`.
-- **Windows:** double-click `start-windows.bat`.
-
-You should see `Connected as ..., watching #your-channel`. Leave the window open while you work (it keeps a live copy of the channel). The agent commands below also work if it is closed, because they fetch recent history themselves.
-
-## Step 12. Tell your AI agent
-
-Paste the contents of `AGENT_RULES.md` into your project's `CLAUDE.md` (or your agent's equivalent instructions file). Agents then run commands such as:
-
-```
-coord status
-coord plan "Add plot upgrade UI" --files src/client/PlotUi.luau
-coord lock src/client/PlotUi.luau roblox:Workspace.Map.Plots --reason "plot upgrade UI"
-coord done "Added plot upgrade UI" --files src/client/PlotUi.luau --commit abc1234
-```
-
-`coord` is the file `coord` (macOS) / `coord.bat` (Windows) in this folder. Put this folder on your PATH, or call it by its full path.
-
----
+`config.toml` can hold a list of friendly statuses (`statuses = ["Stacking bricks", ...]`). While the bot runs it shows one at random and picks a new one every `status_minutes` (0 = once at startup). An empty list means no status. Older config files without these lines keep working.
 
 ## Commands
 
-All commands accept `--json` (for agents) and exit with **0** = fine, **1** = error, **2** = conflict (someone else holds the files).
+All commands accept `--json` and exit with **0** = fine, **1** = error, **2** = conflict (someone else holds the files).
 
 | Command | What it does |
 | --- | --- |
-| `run` | the always-on listener (started by the start script) |
+| `run` | the always-on listener (the start script runs it) |
 | `sync` | fetch recent channel history into the local database |
 | `status` | active locks, recent plans/done, latest commits |
 | `plan "<summary>" [--files a b]` | post what you will change |
@@ -128,12 +68,14 @@ All commands accept `--json` (for agents) and exit with **0** = fine, **1** = er
 | `commits [-n 10]` | recent GitHub commits |
 | `log` | what you yourself posted |
 
-Files are repo paths (`src/server/Systems/PlotSystem.luau`) or (for Roblox projects) instance paths starting with `roblox:` (`roblox:Workspace.Map.Plots`). Locking a folder (`src/server`) also covers everything inside it. Locks expire by themselves after the TTL.
+Files are repo paths such as `src/app/main.py`; for Roblox projects also instance paths like `roblox:Workspace.Map.Plots`. Locking a folder covers everything inside it. Locks expire by themselves after the TTL.
+
+`coord` (macOS/Linux) and `coord.bat` (Windows) in this folder run these commands. Put the folder on your PATH or use the full path.
 
 ## How it stays safe
 
-- Only messages from `trusted_user_ids` (and your own bot) and `trusted_webhook_ids` are stored; everyone else is ignored entirely.
-- Only the machine-readable `coord` block of a trusted bot's message has meaning. The bot only records state. It never runs anything it reads.
+- Only messages from `trusted_user_ids` (and your own bot) and `trusted_webhook_ids` are stored.
+- The bot only records state. It never runs anything it reads.
 - Your bot has no permissions beyond viewing, reading history and sending in the channel.
 
 ## Troubleshooting
@@ -141,16 +83,15 @@ Files are repo paths (`src/server/Systems/PlotSystem.luau`) or (for Roblox proje
 | Problem | Fix |
 | --- | --- |
 | `Could not find .../config.toml` | Run the setup script first. |
-| `bot_token still has the placeholder text` / `channel_id is missing` | Fill in `config.toml` (steps 5, 6) and save. |
-| `Discord rejected the bot token` | Reset the token in the Developer Portal and paste the new one. No extra spaces or quotes inside the quotes. |
-| `Message Content Intent is off` | Step 3. Save changes in the Developer Portal. |
-| `not allowed to see that channel` | Invite the bot (step 4) and, for private channels, allow it in the channel's permissions. |
-| `could not find that channel` | Re-copy the channel id; make sure it is the channel, not the server. |
-| Other agents' messages never show up | Their bot's id must be in `trusted_user_ids`. Check with Developer Mode "Copy User ID" on the bot, not the application id (they can differ). |
-| GitHub commits never show up | Is the webhook URL ending in `/github`? Is the webhook id in `trusted_webhook_ids`? |
-| macOS: "cannot be opened because it is from an unidentified developer" | Right-click the file -> Open -> Open. |
-| macOS: "permission denied" on `.command` | In Terminal: `chmod +x setup-mac.command start-mac.command coord` |
-| Windows: "Python was not found" | Re-run the Python installer, choose Modify/Repair and tick "Add python.exe to PATH". |
-| Messages say `Showing saved data` | Discord could not be reached; you are seeing the last saved copy. Check your internet. |
+| `bot_token ... placeholder` / `channel_id is missing` | Fill in `config.toml` and save. |
+| `Discord rejected the bot token` | Reset the token in the Developer Portal and paste the new one, with no extra spaces. |
+| `Message Content Intent is off` | Turn it on in the Developer Portal (Bot page) and save. |
+| `not allowed to see that channel` | Invite the bot; for private channels allow it in the channel's permissions. |
+| `could not find that channel` | Re-copy the channel id (the channel, not the server). |
+| Other agents' messages never show up | Their bot's user id must be in `trusted_user_ids`. |
+| GitHub commits never show up | Webhook URL must end in `/github`; its id must be in `trusted_webhook_ids`. |
+| macOS "unidentified developer" / "permission denied" | Right-click the file -> Open. Or in Terminal: `chmod +x setup-mac.command start-mac.command coord`. |
+| Windows "Python was not found" | Re-run the Python installer, choose Modify and tick "Add python.exe to PATH". |
+| `Showing saved data` | Discord could not be reached; this is the last saved copy. Check your internet. |
 
-Developers: tests run with `pip install pytest` then `python -m pytest` in this folder.
+Developers: `pip install -r requirements.txt pytest`, then `python -m pytest` in this folder.
