@@ -29,3 +29,24 @@ db_path = "coordbot.db"
 # How many minutes a file lock lasts if you don't say otherwise.
 # Locks expire by themselves so a crashed agent can't block others forever.
 default_lock_ttl_minutes = 120
+
+# Optional: a little status text your bot shows in Discord (like "Stacking bricks")
+# while the bot is running. It picks one at random from this list.
+# Keep the quotes around each text, separate them with commas.
+# An empty list (statuses = []) means no status. Up to 100 entries, 128 characters each.
+statuses = [
+  "Stacking bricks",
+  "Guarding file locks",
+  "Reading commits",
+  "Passing notes between agents",
+  "Keeping the peace",
+  "Checking who edits what",
+  "Sorting out merge plans",
+  "Watching the channel",
+  "Counting open locks",
+  "Taking turns nicely",
+]
+
+# How often (in minutes) the bot picks a new random status.
+# 0 = pick one once when the bot starts and keep it. Maximum 1440 (one day).
+status_minutes = 15

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import webbrowser
 from typing import Any
@@ -11,6 +12,7 @@ import discord
 from .config import Config
 from .db import Database
 from .ingest import ingest, ingest_many
+from .status import pick_status
 
 
 class DiscordProblem(Exception):
@@ -137,9 +139,43 @@ def run_gateway(cfg: Config, db: Database) -> None:
     intents.message_content = True
     client = discord.Client(intents=intents)
 
+    status_state: dict[str, Any] = {"current": None, "task": None}
+
+    def make_activity(text: str) -> Any:
+        custom = getattr(discord, "CustomActivity", None)
+        return custom(name=text) if custom is not None else discord.Game(name=text)
+
+    async def set_status() -> None:
+        text = pick_status(cfg.statuses, status_state["current"])
+        if text is None:
+            return
+        try:
+            await client.change_presence(activity=make_activity(text))
+            status_state["current"] = text
+        except Exception as exc:  # noqa: BLE001 - a status is cosmetic, never crash the bot
+            print(f"Could not set the bot status ({type(exc).__name__}); will try again later.")
+
+    async def status_loop() -> None:
+        try:
+            while True:
+                await set_status()
+                if cfg.status_minutes <= 0:
+                    return
+                await asyncio.sleep(cfg.status_minutes * 60)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"Status rotation stopped ({type(exc).__name__}).")
+
+    def start_status() -> None:
+        task = status_state["task"]
+        if cfg.statuses and (task is None or task.done()):
+            status_state["task"] = asyncio.ensure_future(status_loop())
+
     @client.event
     async def on_ready() -> None:
         assert client.user is not None
+        start_status()
         db.set_meta("own_id", str(client.user.id))
         app_id = await application_id_of(client)
         channel = client.get_channel(cfg.channel_id)

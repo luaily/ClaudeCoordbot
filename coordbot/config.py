@@ -28,6 +28,8 @@ class Config:
     db_path: Path
     default_lock_ttl_minutes: int
     config_path: Path
+    statuses: tuple[str, ...] = ()
+    status_minutes: int = 15
 
 
 def default_config_path() -> Path:
@@ -59,6 +61,29 @@ def _id_list(data: dict[str, Any], key: str, errors: list[str]) -> frozenset[int
         else:
             out.add(n)
     return frozenset(out)
+
+
+MAX_STATUSES = 100
+MAX_STATUS_LENGTH = 128
+
+
+def _status_list(data: dict[str, Any], errors: list[str]) -> tuple[str, ...]:
+    raw = data.get("statuses", [])
+    if not isinstance(raw, list):
+        errors.append('statuses must be a list of texts in quotes, like statuses = ["Stacking bricks", "Reading commits"]')
+        return ()
+    if len(raw) > MAX_STATUSES:
+        errors.append(f"statuses has {len(raw)} entries; the most allowed is {MAX_STATUSES}")
+        return ()
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"statuses may only contain non-empty texts in quotes, not {item!r}")
+        elif len(item.strip()) > MAX_STATUS_LENGTH:
+            errors.append(f"a status is too long (max {MAX_STATUS_LENGTH} characters): {item.strip()[:30]!r}...")
+        else:
+            out.append(item.strip())
+    return tuple(out)
 
 
 def parse_config(data: dict[str, Any], config_path: Path) -> Config:
@@ -105,11 +130,18 @@ def parse_config(data: dict[str, Any], config_path: Path) -> Config:
         errors.append("default_lock_ttl_minutes must be a whole number of minutes between 1 and 10080")
         ttl = 120
 
+    statuses = _status_list(data, errors)
+
+    minutes = data.get("status_minutes", 15)
+    if isinstance(minutes, bool) or not isinstance(minutes, int) or not (0 <= minutes <= 1440):
+        errors.append("status_minutes must be a whole number of minutes between 0 and 1440 (0 = pick once at startup)")
+        minutes = 15
+
     if errors:
         raise ConfigError(
             f"Problems in {config_path}:\n" + "\n".join(f"  - {e}" for e in errors)
         )
-    return Config(token, channel_id, agent, users, hooks, db_path, ttl, config_path)
+    return Config(token, channel_id, agent, users, hooks, db_path, ttl, config_path, statuses, minutes)
 
 
 def load_config(path: Path | None = None) -> Config:
