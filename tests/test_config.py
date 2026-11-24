@@ -110,7 +110,7 @@ def test_team_file_merges(tmp_path, monkeypatch):
     cfg = load_config(personal, proj / "src")
     assert cfg.channel_id == 55 and cfg.trusted_user_ids == frozenset({7, 8})
     assert cfg.team and cfg.team.required and cfg.team.root == proj
-    assert cfg.db_path.name == "demo-55.db" and cfg.idle_minutes == 10
+    assert cfg.db_path.name == "demo-55.db" and cfg.idle_minutes == 20 and cfg.away_minutes == 5
 
 
 def test_bad_idle(tmp_path):

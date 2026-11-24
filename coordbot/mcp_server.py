@@ -148,15 +148,16 @@ class Hub:
             return self.session
 
     async def watch_idle(self) -> None:
+        """Idle after away_minutes, offline after idle_minutes; any tool call brings it back."""
         while True:
             await asyncio.sleep(15)
-            s, cfg = self.session, self.cfg
-            if s is None or cfg is None or not cfg.idle_minutes or not s.online:
-                continue
-            if s.idle_seconds() > cfg.idle_minutes * 60:
+            s = self.session
+            if s is not None and s.online:
                 async with self.lock:
-                    say(f"coordbot: no activity for {cfg.idle_minutes} minutes, going offline.")
-                    await s.stop()
+                    try:
+                        await s.tick()
+                    except Exception as exc:  # noqa: BLE001
+                        say(f"coordbot: idle check failed ({type(exc).__name__}).")
 
     async def close(self) -> None:
         if self.watchdog:

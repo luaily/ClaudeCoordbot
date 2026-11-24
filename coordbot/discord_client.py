@@ -275,6 +275,9 @@ class GatewaySession(_ChannelOps):
         self._task: asyncio.Task[None] | None = None
         self._status_task: asyncio.Task[None] | None = None
         self._status: str | None = None
+        self._activity: Any = None
+        self._presence = discord.Status.online
+        self._seen_stamp = time.time()
         self._on_message = on_message
 
     # ----- lifecycle -----
@@ -314,7 +317,45 @@ class GatewaySession(_ChannelOps):
         return self.ready.is_set() and not self.client.is_closed()
 
     def touch(self) -> None:
+        """Activity (a post, a read, an acknowledgement, a message): restart the idle timer."""
         self.last_activity = time.monotonic()
+        if self._presence is not discord.Status.online and self.online:
+            self._set_presence_soon(discord.Status.online)
+
+    def _set_presence_soon(self, status: discord.Status) -> None:
+        self._presence = status
+        try:
+            asyncio.get_running_loop().create_task(self._apply_presence())
+        except RuntimeError:  # no loop running (tests, shutdown)
+            pass
+
+    async def _apply_presence(self) -> None:
+        try:
+            await self.client.change_presence(status=self._presence, activity=self._activity)
+        except Exception:  # noqa: BLE001 - presence is cosmetic
+            pass
+
+    async def tick(self) -> bool:
+        """Call about every 15 s. Shows idle after away_minutes, goes offline after idle_minutes.
+        Returns False once it went offline."""
+        now = time.time()
+        self.db.set_meta("gateway_heartbeat", str(now))
+        # Agent commands (CLI or MCP, any process) stamp activity in the shared database.
+        stamp = float(self.db.get_meta("last_local_activity") or 0)
+        if stamp > self._seen_stamp:
+            self._seen_stamp = stamp
+            self.touch()
+        quiet = self.idle_seconds()
+        if self.cfg.idle_minutes and quiet > self.cfg.idle_minutes * 60:
+            say(f"No activity for {self.cfg.idle_minutes} minutes: going offline. It comes back on the next "
+                "agent command.")
+            await self.stop()
+            return False
+        if self.cfg.away_minutes and quiet > self.cfg.away_minutes * 60 \
+                and self._presence is discord.Status.online:
+            self._presence = discord.Status.idle
+            await self._apply_presence()
+        return True
 
     def idle_seconds(self) -> float:
         return time.monotonic() - self.last_activity
@@ -324,6 +365,7 @@ class GatewaySession(_ChannelOps):
         self.touch()
         if self.online:
             return
+        self._presence = discord.Status.online
         if self.client.is_closed():
             self.client = self._make_client()
             self.ready = asyncio.Event()
@@ -348,6 +390,7 @@ class GatewaySession(_ChannelOps):
             self.problem = explain(exc)
 
     async def stop(self) -> None:
+        self.db.set_meta("gateway_heartbeat", "0")
         if self._status_task:
             self._status_task.cancel()
             self._status_task = None
@@ -390,6 +433,7 @@ class GatewaySession(_ChannelOps):
             say(f"Could not read past messages: {explain(exc)}")
             recs = []
         self._ack_task = asyncio.ensure_future(self._startup_acks(recs))
+        self.db.set_meta("gateway_heartbeat", str(time.time()))
         self._start_status()
         say(f"Online as {client.user}, watching #{getattr(channel, 'name', self.cfg.channel_id)}.")
         self.ready.set()
@@ -418,8 +462,8 @@ class GatewaySession(_ChannelOps):
         if ingest(self.db, self.cfg, rec, self.own_id):
             self.db.rebuild_locks(self.cfg.default_lock_ttl_minutes)
             await self.acknowledge([rec], self.db, self.cfg, self.own_id)
+            self.touch()  # any trusted post (ours or theirs) or a receipt we sent counts as activity
             if rec["author_id"] != self.own_id:
-                self.touch()  # other agents talking counts as activity
                 if self._on_message:
                     self._on_message()
 
@@ -437,7 +481,8 @@ class GatewaySession(_ChannelOps):
                     return
                 try:
                     activity = custom(name=text) if custom is not None else discord.Game(name=text)
-                    await self.client.change_presence(activity=activity)
+                    self._activity = activity
+                    await self.client.change_presence(activity=activity, status=self._presence)
                     self._status = text
                 except Exception as exc:  # noqa: BLE001 - a status is cosmetic, never crash the bot
                     say(f"Could not set the bot status ({type(exc).__name__}); will try again later.")
@@ -455,17 +500,13 @@ async def run_until_idle(cfg: Config, db: Database) -> None:
     session = GatewaySession(cfg, db)
     await session.start(timeout=60)
     idle = cfg.idle_minutes
-    say("Leave this window open. Press Ctrl+C to stop."
-        + (f" The bot goes offline by itself after {idle} minutes with no activity." if idle else ""))
+    say("Press Ctrl+C to stop."
+        + (f" Shows idle after {cfg.away_minutes} quiet minutes" if cfg.away_minutes else "")
+        + (f", goes offline after {idle} minutes with no activity." if idle else "."))
     try:
         while session.online:
             await asyncio.sleep(15)
-            # Agent commands (CLI/MCP) mark activity in the shared database.
-            stamp = db.get_meta("last_local_activity")
-            if stamp and time.time() - float(stamp) < 30:
-                session.touch()
-            if idle and session.idle_seconds() > idle * 60:
-                say(f"No activity for {idle} minutes: going offline. Start the bot again when you need it.")
+            if not await session.tick():
                 break
     finally:
         await session.stop()

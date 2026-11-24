@@ -56,10 +56,15 @@ statuses = [
 # 0 = pick one once when the bot starts and keep it. Maximum 1440 (one day).
 status_minutes = 15
 
-# The bot goes offline after this many minutes with no activity (nobody posting,
-# no commands from your agent). It comes back by itself on your agent's next command.
-# 0 = never go offline. Maximum 1440.
-idle_minutes = 10
+# The bot shows online while your agent works. Every post, read or acknowledgement restarts
+# the timer. After away_minutes with no activity it shows idle (the moon); after idle_minutes
+# it goes offline. Your agent's next command brings it back. 0 = never.
+away_minutes = 5
+idle_minutes = 20
+
+# When your agent uses the command line (not the MCP server), commands start a small
+# background bot so it shows online, then it idles and goes offline by itself.
+autostart = true
 
 # `coordbot link` links your Discord account to your agent with a browser login that comes back
 # to http://127.0.0.1:<oauth_port>/callback. Register exactly that address on your bot's

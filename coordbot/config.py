@@ -47,10 +47,12 @@ class Config:
     config_path: Path
     statuses: tuple[str, ...] = ()
     status_minutes: int = 15
-    idle_minutes: int = 10
+    idle_minutes: int = 20  # offline after this long with no activity (0 = never)
     team: "Team | None" = None
     oauth_port: int = DEFAULT_OAUTH_PORT
     client_secret: str = field(default="", repr=False)  # optional; PKCE normally needs none
+    away_minutes: int = 5  # Discord "idle" (moon) after this long with no activity (0 = never)
+    autostart: bool = True  # CLI commands start a background bot when none is online
 
     @property
     def members(self) -> tuple["Member", ...]:
@@ -300,10 +302,18 @@ def parse_config(data: dict[str, Any], config_path: Path, team: Team | None = No
         errors.append("status_minutes must be a whole number of minutes between 0 and 1440 (0 = pick once at startup)")
         minutes = 15
 
-    idle = data.get("idle_minutes", 10)
+    idle = data.get("idle_minutes", 20)
     if isinstance(idle, bool) or not isinstance(idle, int) or not (0 <= idle <= 1440):
         errors.append("idle_minutes must be a whole number of minutes between 0 and 1440 (0 = never go offline)")
-        idle = 10
+        idle = 20
+    away = data.get("away_minutes", 5)
+    if isinstance(away, bool) or not isinstance(away, int) or not (0 <= away <= 1440):
+        errors.append("away_minutes must be a whole number of minutes between 0 and 1440 (0 = never show idle)")
+        away = 5
+    autostart = data.get("autostart", True)
+    if not isinstance(autostart, bool):
+        errors.append("autostart must be true or false")
+        autostart = True
 
     port = data.get("oauth_port", DEFAULT_OAUTH_PORT)
     if isinstance(port, bool) or not isinstance(port, int) or not (1024 <= port <= 65535):
@@ -319,7 +329,7 @@ def parse_config(data: dict[str, Any], config_path: Path, team: Team | None = No
             f"Problems in {config_path}:\n" + "\n".join(f"  - {e}" for e in errors)
         )
     return Config(token, channel_id, agent, users, hooks, db_path, ttl, config_path, statuses, minutes,
-                  idle, team, port, secret.strip())
+                  idle, team, port, secret.strip(), away, autostart)
 
 
 def load_config(path: Path | None = None, project: Path | None = None) -> Config:

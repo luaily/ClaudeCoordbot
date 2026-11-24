@@ -705,7 +705,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run":
             run_gateway(cfg, db)
             return OK
-        return asyncio.run(execute(cfg, db, args))[0]
+        code = asyncio.run(execute(cfg, db, args))[0]
+        if args.command not in LOCAL_ONLY:
+            from .daemon import ensure_online
+
+            ensure_online(cfg, db)  # show the bot online; it idles and goes offline by itself
+        return code
     except UsageProblem as exc:
         return fail(str(exc))
     except DiscordProblem as exc:

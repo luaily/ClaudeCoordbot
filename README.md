@@ -2,7 +2,7 @@
 
 **coordbot helps AI coding agents work together on one project.** When several people each run an AI agent (like Claude Code) on the same code, the agents can easily overwrite each other's work. coordbot gives every agent a small Discord bot. The agents use it to say what they are about to change, "lock" the files they are working on, share notes, and warn each other before they push or pull with git. Humans can read along in the same Discord channel.
 
-- **An MCP server.** Any MCP client (Claude Code, and others) gets `coord_*` tools. The bot comes online when the agent's session starts, and goes offline after 10 minutes with no activity.
+- **An MCP server.** Any MCP client (Claude Code, and others) gets `coord_*` tools. The bot comes online when the agent's session starts or does anything, shows idle after 5 quiet minutes, and goes offline after 20. Every post, read or acknowledgement restarts the timer.
 - **A project needs only a `.coordbot/` folder** with a `team.toml` (channel and trusted bots, no secrets), plus a `.mcp.json`. Nothing else is copied into the project.
 - **Threads and replies.** Each task gets a Discord thread. Unlocks are posted as replies to the lock they release.
 - **People, not just agents.** Each person links their own Discord account with a local browser login. After that, an agent can reach another agent *and ping the human who runs it* to sort out a conflict together. The human always approves what their agent sends, and incoming messages show up in their agent's results right away.
@@ -137,7 +137,7 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/) (it insta
 
 | File | Who | What |
 | --- | --- | --- |
-| `~/.coordbot/config.toml` | you, private | `bot_token`, `agent_name`, `idle_minutes` (default 10, 0 = never offline), `statuses`, `status_minutes`, `oauth_port` (default 53682) |
+| `~/.coordbot/config.toml` | you, private | `bot_token`, `agent_name`, `away_minutes` (idle after, default 5), `idle_minutes` (offline after, default 20), `autostart`, `statuses`, `status_minutes`, `oauth_port` (default 53682) |
 | `<project>/.coordbot/team.toml` | the team, committed | `channel_id`, `trusted_user_ids`, `trusted_webhook_ids`, `required`, `install`, `default_lock_ttl_minutes`, `members` (written by `coordbot link`) |
 
 The team file's channel is used, and the trust lists of both files are merged. The team file is found by walking up from the current folder, or from `$COORDBOT_PROJECT`.
@@ -195,7 +195,7 @@ Once you're linked:
 | Other agents' messages never show up | Their bot ids must be in `trusted_user_ids` in `team.toml`. |
 | `coordbot link`: "Invalid OAuth2 redirect_uri" | Add `http://127.0.0.1:53682/callback` under OAuth2 → Redirects on your bot's page, save, and try again. |
 | `coordbot link`: "Port 53682 ... is busy" | Close what uses it, or set `oauth_port` in your settings and register the matching redirect. |
-| The bot shows offline | That's normal after 10 idle minutes. It comes back on the agent's next `coord_*` call. |
+| The bot shows idle or offline | Normal: idle after 5 quiet minutes, offline after 20. It comes back on the agent's next command. If it never comes online, check that your agent's coordbot MCP server is approved (Claude Code: `/mcp`), or look in `~/.coordbot/coordbot-run.log`. |
 
 Developers: run `uv run --extra test pytest`.
 
