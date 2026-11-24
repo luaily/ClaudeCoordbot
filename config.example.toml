@@ -60,3 +60,12 @@ status_minutes = 15
 # no commands from your agent). It comes back by itself on your agent's next command.
 # 0 = never go offline. Maximum 1440.
 idle_minutes = 10
+
+# `coordbot link` links your Discord account to your agent with a browser login that comes back
+# to http://127.0.0.1:<oauth_port>/callback. Register exactly that address on your bot's
+# Developer Portal page: OAuth2 -> Redirects. Change the port only if 53682 is taken.
+oauth_port = 53682
+
+# Usually not needed (the login uses PKCE). Only if `coordbot link` says Discord refused the
+# login code: paste OAuth2 -> Client Secret here. It is a secret, like the token.
+# client_secret = ""

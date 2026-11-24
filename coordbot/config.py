@@ -27,6 +27,7 @@ DEFAULT_CONFIG_PATH = HOME_CONFIG
 TEAM_DIR = ".coordbot"
 TEAM_FILE = "team.toml"
 DEFAULT_INSTALL = "https://github.com/luaily/ClaudeCoordbot"
+DEFAULT_OAUTH_PORT = 53682
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
 
 
@@ -48,6 +49,32 @@ class Config:
     status_minutes: int = 15
     idle_minutes: int = 10
     team: "Team | None" = None
+    oauth_port: int = DEFAULT_OAUTH_PORT
+    client_secret: str = field(default="", repr=False)  # optional; PKCE normally needs none
+
+    @property
+    def members(self) -> tuple["Member", ...]:
+        return self.team.members if self.team else ()
+
+    def member_by_bot(self, bot_id: int) -> "Member | None":
+        return next((m for m in self.members if m.bot_id == bot_id), None)
+
+    def member_by_agent(self, agent: str) -> "Member | None":
+        a = agent.strip().lower()
+        return next((m for m in self.members if m.agent.lower() == a), None)
+
+    def member_humans(self) -> frozenset[int]:
+        return frozenset(m.user_id for m in self.members)
+
+
+@dataclass(frozen=True)
+class Member:
+    """One teammate: their agent's bot and the human who runs it (linked with `coordbot link`)."""
+
+    agent: str
+    bot_id: int
+    user_id: int
+    name: str
 
 
 @dataclass(frozen=True)
@@ -62,6 +89,7 @@ class Team:
     required: bool
     install: str
     default_lock_ttl_minutes: int | None
+    members: tuple[Member, ...] = ()
 
     @property
     def root(self) -> Path:
@@ -126,9 +154,29 @@ def parse_team(data: dict[str, Any], path: Path) -> Team:
     if ttl is not None and (isinstance(ttl, bool) or not isinstance(ttl, int) or not 1 <= ttl <= 10080):
         errors.append("default_lock_ttl_minutes must be between 1 and 10080")
         ttl = None
+    members = _members(data, errors)
     if errors:
         raise ConfigError(f"Problems in the team file {path}:\n" + "\n".join(f"  - {e}" for e in errors))
-    return Team(path, project.strip(), channel_id, users, hooks, required, install, ttl)
+    return Team(path, project.strip(), channel_id, users, hooks, required, install, ttl, members)
+
+
+def _members(data: dict[str, Any], errors: list[str]) -> tuple[Member, ...]:
+    raw = data.get("members", [])
+    if not isinstance(raw, list):
+        errors.append("members must be a list (written by `coordbot link`)")
+        return ()
+    out: list[Member] = []
+    for i, m in enumerate(raw):
+        if not isinstance(m, dict):
+            errors.append(f"members entry {i + 1} is not a table")
+            continue
+        bot, user = _as_id(m.get("bot_id")), _as_id(m.get("user_id"))
+        agent, name = m.get("agent", ""), m.get("name", "")
+        if bot is None or user is None or not isinstance(agent, str) or not _NAME_RE.match(agent or "-"):
+            errors.append(f"members entry {i + 1} needs agent, bot_id and user_id (run `coordbot link` again)")
+            continue
+        out.append(Member(agent, bot, user, name if isinstance(name, str) else ""))
+    return tuple(out)
 
 
 def load_team(start: Path | None = None) -> Team | None:
@@ -191,7 +239,9 @@ def parse_config(data: dict[str, Any], config_path: Path, team: Team | None = No
     if team is not None:
         # The project's shared settings: its channel wins, trust lists are merged.
         data["channel_id"] = team.channel_id
-        for key, ids in (("trusted_user_ids", team.trusted_user_ids),
+        # Linked members are trusted: their agent's bot and the human who runs it.
+        member_ids = frozenset(i for m in team.members for i in (m.bot_id, m.user_id))
+        for key, ids in (("trusted_user_ids", team.trusted_user_ids | member_ids),
                          ("trusted_webhook_ids", team.trusted_webhook_ids)):
             own = data.get(key, [])
             if isinstance(own, list):  # a bad value is left alone so validation reports it
@@ -255,12 +305,21 @@ def parse_config(data: dict[str, Any], config_path: Path, team: Team | None = No
         errors.append("idle_minutes must be a whole number of minutes between 0 and 1440 (0 = never go offline)")
         idle = 10
 
+    port = data.get("oauth_port", DEFAULT_OAUTH_PORT)
+    if isinstance(port, bool) or not isinstance(port, int) or not (1024 <= port <= 65535):
+        errors.append("oauth_port must be a port number between 1024 and 65535")
+        port = DEFAULT_OAUTH_PORT
+    secret = data.get("client_secret", "")
+    if not isinstance(secret, str):
+        errors.append("client_secret must be text in quotes (or leave it out)")
+        secret = ""
+
     if errors:
         raise ConfigError(
             f"Problems in {config_path}:\n" + "\n".join(f"  - {e}" for e in errors)
         )
     return Config(token, channel_id, agent, users, hooks, db_path, ttl, config_path, statuses, minutes,
-                  idle, team)
+                  idle, team, port, secret.strip())
 
 
 def load_config(path: Path | None = None, project: Path | None = None) -> Config:

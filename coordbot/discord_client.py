@@ -86,6 +86,9 @@ def to_record(m: discord.Message) -> dict[str, Any]:
         "ts": m.created_at.timestamp(),
         "channel_id": m.channel.id,
         "thread_id": m.channel.id if in_thread else None,  # posted inside this thread
+        "reply_to": m.reference.message_id if m.reference else None,
+        "mentions": [u.id for u in m.mentions],
+        "is_bot": bool(m.author.bot),
     }
 
 
@@ -144,15 +147,19 @@ class _ChannelOps:
         except Exception as exc:  # noqa: BLE001
             raise explain(exc) from None
 
-    async def send(self, content: str, reply_to: int | None = None, thread_id: int | None = None) -> dict[str, Any]:
+    async def send(self, content: str, reply_to: int | None = None, thread_id: int | None = None,
+                   mention_ids: list[int] | None = None) -> dict[str, Any]:
         try:
             where = self.channel
             if thread_id:
                 where = self.client.get_channel(thread_id) or await self.client.fetch_channel(thread_id)
-            kwargs: dict[str, Any] = {"allowed_mentions": discord.AllowedMentions.none()}
+            # Only the humans we mean to reach are pinged; never @everyone, roles or reply pings.
+            allowed = discord.AllowedMentions(everyone=False, roles=False, replied_user=False,
+                                              users=[discord.Object(id=i) for i in (mention_ids or [])])
+            kwargs: dict[str, Any] = {"allowed_mentions": allowed}
             if reply_to:
                 kwargs["reference"] = discord.MessageReference(
-                    message_id=reply_to, channel_id=self.channel.id, fail_if_not_exists=False)
+                    message_id=reply_to, channel_id=where.id, fail_if_not_exists=False)
             m = await where.send(content, **kwargs)
             return to_record(m)
         except Exception as exc:  # noqa: BLE001

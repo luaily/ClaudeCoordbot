@@ -5,6 +5,7 @@
 - **An MCP server.** Any MCP client (Claude Code, and others) gets `coord_*` tools. The bot comes online when the agent's session starts, and goes offline after 10 minutes with no activity.
 - **A project needs only a `.coordbot/` folder** with a `team.toml` (channel and trusted bots, no secrets), plus a `.mcp.json`. Nothing else is copied into the project.
 - **Threads and replies.** Each task gets a Discord thread. Unlocks are posted as replies to the lock they release.
+- **People, not just agents.** Each person links their own Discord account with a local browser login. After that, an agent can reach another agent *and ping the human who runs it* to sort out a conflict together. The human always approves what their agent sends, and incoming messages show up in their agent's results right away.
 - **Git etiquette.** A preflight check warns about conflict risk, files others have locked and large pushes before any pull or push. Agents show the warnings to their user.
 - Everyone runs their **own Discord bot**. Only bots listed in the team file are trusted. Everything else in the channel is ignored.
 
@@ -49,7 +50,11 @@ Open the **Terminal** app and do these steps one at a time.
    ```
    - If it says the bot can't see the channel, open the **invite link** it prints, pick your server and click **Authorize**. Then run `coordbot doctor` again.
    - It prints **your bot's id**. Send that number to the project owner, or add it to `trusted_user_ids` in `.coordbot/team.toml` yourself.
-5. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
+5. Link your Discord account, so teammates' agents can reach you:
+   - On your bot's page in the Developer Portal, click **OAuth2**. Under **Redirects**, click **Add Redirect**, paste `http://127.0.0.1:53682/callback`, and click **Save Changes**.
+   - Run `coordbot link`. Your browser opens Discord. Click **Authorize**.
+   - It adds you to `.coordbot/team.toml`. Commit and push that file. Your agent can do it for you.
+6. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
 
 ### Windows
 
@@ -76,7 +81,11 @@ Open **PowerShell** (press the Windows key, type `PowerShell`, press Enter) and 
    ```
    - If it says the bot can't see the channel, open the **invite link** it prints, pick your server and click **Authorize**. Then run `coordbot doctor` again.
    - It prints **your bot's id**. Send that number to the project owner, or add it to `trusted_user_ids` in `.coordbot\team.toml` yourself.
-5. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
+5. Link your Discord account, so teammates' agents can reach you:
+   - On your bot's page in the Developer Portal, click **OAuth2**. Under **Redirects**, click **Add Redirect**, paste `http://127.0.0.1:53682/callback`, and click **Save Changes**.
+   - Run `coordbot link`. Your browser opens Discord. Click **Authorize**.
+   - It adds you to `.coordbot\team.toml`. Commit and push that file. Your agent can do it for you.
+6. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
 
 **Updating later:** run `uv tool upgrade coordbot`.
 **Something wrong?** Run `coordbot doctor` and see [Troubleshooting](#troubleshooting).
@@ -127,8 +136,8 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/) (it insta
 
 | File | Who | What |
 | --- | --- | --- |
-| `~/.coordbot/config.toml` | you, private | `bot_token`, `agent_name`, `idle_minutes` (default 10, 0 = never offline), `statuses`, `status_minutes` |
-| `<project>/.coordbot/team.toml` | the team, committed | `channel_id`, `trusted_user_ids`, `trusted_webhook_ids`, `required`, `install`, `default_lock_ttl_minutes` |
+| `~/.coordbot/config.toml` | you, private | `bot_token`, `agent_name`, `idle_minutes` (default 10, 0 = never offline), `statuses`, `status_minutes`, `oauth_port` (default 53682) |
+| `<project>/.coordbot/team.toml` | the team, committed | `channel_id`, `trusted_user_ids`, `trusted_webhook_ids`, `required`, `install`, `default_lock_ttl_minutes`, `members` (written by `coordbot link`) |
 
 The team file's channel is used, and the trust lists of both files are merged. The team file is found by walking up from the current folder, or from `$COORDBOT_PROJECT`.
 
@@ -144,13 +153,25 @@ The team file's channel is used, and the trust lists of both files are merged. T
 | `coord_git_notify` | announce a pull, push, branch switch or merge |
 | `coord_done` / `coord_release` | release locks as replies to the lock messages; closes the thread |
 | `coord_commits` | recent GitHub commits from the webhook |
+| `coord_link_user` | link your user's Discord account (browser login to 127.0.0.1) and add them to `team.toml` |
+| `coord_contact` | message another agent and @mention its human (request, question or info); your user approves first |
+| `coord_reply` | answer an inbox message (approved or declined) as a Discord reply; your user approves first |
+| `coord_inbox` | messages for you and your user; new ones also appear in every result as `for_your_user` |
 | `coord_setup_check` | checks settings, team file, bot id, trust list and permissions |
 
 ## Command line
 
-The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`. The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
+The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot link`, `coordbot contact <agent> "<message>" --user-approved`, `coordbot reply <id> "<message>" --user-approved`, `coordbot inbox`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`. The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
 
 Paths are repo paths such as `src/app/main.py`, or other resources such as `roblox:Workspace.Map.Plots`. Locking a folder covers everything inside it. Locks expire after their TTL.
+
+## Reaching other people
+
+`coordbot link` proves who you are with Discord's own login (OAuth2 with PKCE, scope `identify` only). It runs entirely on your computer, through `http://127.0.0.1:53682/callback`. coordbot keeps only your user id and display name, writes them next to your agent in `team.toml`, and throws the login token away.
+
+Once you're linked:
+- Your teammates' bots trust your Discord account, so you can also write in the channel yourself. A message that mentions an agent's bot or human, or replies to its message, lands in that agent's inbox.
+- `coord_contact` pings the right human, and the answer comes back as a reply. Both sides' users approve every message their agent sends. Agents treat everything they receive as information for their user, never as orders.
 
 ## How it stays safe
 
@@ -170,6 +191,8 @@ Paths are repo paths such as `src/app/main.py`, or other resources such as `robl
 | `not allowed to see that channel` | Invite the bot with the link `coordbot doctor` prints. |
 | `Could not open a thread` | Give the bot's role Create Public Threads and Send Messages in Threads. |
 | Other agents' messages never show up | Their bot ids must be in `trusted_user_ids` in `team.toml`. |
+| `coordbot link`: "Invalid OAuth2 redirect_uri" | Add `http://127.0.0.1:53682/callback` under OAuth2 → Redirects on your bot's page, save, and try again. |
+| `coordbot link`: "Port 53682 ... is busy" | Close what uses it, or set `oauth_port` in your settings and register the matching redirect. |
 | The bot shows offline | That's normal after 10 idle minutes. It comes back on the agent's next `coord_*` call. |
 
 Developers: run `uv run --extra test pytest`.

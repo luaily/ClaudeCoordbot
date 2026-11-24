@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS commits (
   msg_id INTEGER, raw TEXT, PRIMARY KEY (sha, branch));
 CREATE TABLE IF NOT EXISTS own_actions (
   msg_id INTEGER PRIMARY KEY, type TEXT, summary TEXT, files TEXT, commit_sha TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS inbox (
+  msg_id INTEGER PRIMARY KEY, from_id INTEGER, from_agent TEXT, from_human TEXT, kind TEXT,
+  text TEXT, ref TEXT, uid TEXT, decision TEXT, files TEXT, thread_id INTEGER, ts REAL,
+  delivered INTEGER DEFAULT 0, handled INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS threads (
   root_msg_id INTEGER PRIMARY KEY, thread_id INTEGER, author_id INTEGER, ts REAL, closed INTEGER DEFAULT 0);
 """
@@ -39,6 +43,8 @@ MIGRATIONS = [
     ("events", "channel_id", "INTEGER"),
     ("messages", "channel_id", "INTEGER"),
     ("messages", "thread_id", "INTEGER"),
+    ("messages", "reply_to", "INTEGER"),
+    ("messages", "mentions", "TEXT"),
 ]
 
 
@@ -95,10 +101,11 @@ class Database:
         with self.conn:
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO messages (id, author_id, author_name, webhook_id, content, embeds, ts,"
-                " channel_id, thread_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                " channel_id, thread_id, reply_to, mentions) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (rec["id"], rec["author_id"], rec["author_name"], rec.get("webhook_id"),
                  rec.get("content", ""), json.dumps(rec.get("embeds", [])), rec["ts"],
-                 rec.get("channel_id"), rec.get("thread_id")))
+                 rec.get("channel_id"), rec.get("thread_id"), rec.get("reply_to"),
+                 json.dumps(rec.get("mentions") or [])))
             if rec.get("thread_id"):
                 # A thread started from a message has that message's id.
                 self.conn.execute(
@@ -194,6 +201,40 @@ class Database:
         rows = self.conn.execute("SELECT thread_id FROM threads WHERE closed=0 AND ts > ?"
                                  " ORDER BY ts DESC LIMIT ?", (time.time() - max_age_s, limit)).fetchall()
         return [int(r["thread_id"]) for r in rows if r["thread_id"]]
+
+    # inbox: contacts addressed to this agent or its human
+    def add_inbox(self, item: dict[str, Any]) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO inbox (msg_id, from_id, from_agent, from_human, kind, text, ref, uid,"
+                " decision, files, thread_id, ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (item["msg_id"], item["from_id"], item.get("from_agent"), item.get("from_human"), item["kind"],
+                 item["text"], item.get("ref"), item.get("uid"), item.get("decision"),
+                 json.dumps(item.get("files") or []), item.get("thread_id"), item["ts"]))
+
+    def inbox(self, only_undelivered: bool = False, include_handled: bool = False,
+              limit: int = 30) -> list[dict[str, Any]]:
+        where = ["1=1"]
+        if only_undelivered:
+            where.append("delivered=0")
+        if not include_handled:
+            where.append("handled=0")
+        rows = self.conn.execute(f"SELECT * FROM inbox WHERE {' AND '.join(where)} ORDER BY msg_id DESC LIMIT ?",
+                                 (limit,)).fetchall()
+        return [{**dict(r), "files": json.loads(r["files"] or "[]")} for r in rows]
+
+    def inbox_item(self, msg_id: int) -> dict[str, Any] | None:
+        r = self.conn.execute("SELECT * FROM inbox WHERE msg_id=?", (msg_id,)).fetchone()
+        return {**dict(r), "files": json.loads(r["files"] or "[]")} if r else None
+
+    def mark_inbox(self, msg_ids: list[int], field: str) -> None:
+        assert field in ("delivered", "handled")
+        with self.conn:
+            self.conn.executemany(f"UPDATE inbox SET {field}=1 WHERE msg_id=?", [(i,) for i in msg_ids])
+
+    def message(self, msg_id: int) -> dict[str, Any] | None:
+        r = self.conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+        return dict(r) if r else None
 
     def own_actions(self, limit: int) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM own_actions ORDER BY msg_id DESC LIMIT ?", (limit,)).fetchall()

@@ -116,3 +116,14 @@ def test_invite_url_has_only_needed_permissions():
     assert "client_id=123456789012345678" in url
     assert "permissions=309237713920" in url
     assert "scope=bot" in url
+
+
+def test_contact_roundtrip():
+    from coordbot.protocol import build_messages, parse_coord
+
+    [(content, _)] = build_messages("contact", "a", text="please release", kind="answer", to="b",
+                                    ref="uid-1", decision="approved", mention=123)
+    assert "<@123>" in content and "(approved)" in content
+    ev = parse_coord(content)
+    assert (ev.type, ev.kind, ev.to, ev.ref, ev.decision) == ("contact", "answer", "b", "uid-1", "approved")
+    assert parse_coord(content.replace('"approved"', '"maybe"')) is None

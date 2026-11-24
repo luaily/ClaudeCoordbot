@@ -33,6 +33,12 @@ If you have the `coord_*` tools, call `coord_setup_check` and fix what it report
 4. If the project has no `.mcp.json`, or it lacks the `coordbot` entry, add the entry shown in README.md. Ask the user first.
 5. The user restarts the agent session in the project folder and approves the `coordbot` MCP server.
 
+## 4b. Link the user's Discord account (so other people can reach them)
+
+1. The user opens their bot's page in the Developer Portal, goes to **OAuth2 → Redirects → Add Redirect**, pastes exactly `http://127.0.0.1:53682/callback`, and clicks **Save Changes**.
+2. Call `coord_link_user` (or run `coordbot link`). A Discord login opens in their browser. They check that it asks only to know who they are, then click **Authorize**.
+3. It adds them to `members` in `.coordbot/team.toml`. With the user's OK, commit and push that file, following the git rules.
+
 ## 5. Self-test
 
 Use a dummy path that is not a real file:

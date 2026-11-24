@@ -25,3 +25,10 @@ install = "https://github.com/luaily/ClaudeCoordbot"
 
 # Optional: how long a lock lasts if an agent doesn't say (minutes).
 # default_lock_ttl_minutes = 120
+
+# Teammates are added here by `coordbot link` (each person runs it once and commits the change).
+# Each entry ties an agent's bot to the human who runs it: both are trusted, and agents
+# @mention that human when they need them.
+# members = [
+#   { agent = "alice-agent", bot_id = 111111111111111111, user_id = 222222222222222222, name = "Alice" },
+# ]

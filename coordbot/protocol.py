@@ -16,9 +16,12 @@ RESERVE = 500  # room kept free for files in every chunk
 MAX_PATH_LEN = 240
 MAX_FILES = 500
 MAX_TEXT = 600
-TYPES = ("plan", "lock", "release", "done", "context", "git")
+TYPES = ("plan", "lock", "release", "done", "context", "git", "contact")
 CONTEXT_KINDS = ("context", "defense", "question")
 GIT_ACTIONS = ("pull", "push", "branch", "merge")
+CONTACT_KINDS = ("request", "question", "info", "answer")  # agent -> another agent and its human
+DECISIONS = ("approved", "declined")
+MAX_NAME = 64
 MAX_BRANCH = 100
 ROBLOX_PREFIX = "roblox:"
 
@@ -39,6 +42,9 @@ class CoordEvent:
     kind: str | None = None  # context: context | defense | question
     action: str | None = None  # git: pull | push | branch | merge
     branch: str | None = None  # git: branch name
+    to: str | None = None  # contact: the agent addressed ("all" = everyone)
+    ref: str | None = None  # contact answer: id of the contact it answers
+    decision: str | None = None  # contact answer: approved | declined
 
 
 # ---------- paths ----------
@@ -83,7 +89,8 @@ def encode_block(payload: dict[str, Any]) -> str:
 
 def _payload(type_: str, agent: str, files: list[str], text: str, ttl: int | None,
              commit: str | None, all_: bool, ts: float, kind: str | None = None,
-             action: str | None = None, branch: str | None = None) -> dict[str, Any]:
+             action: str | None = None, branch: str | None = None, to: str | None = None,
+             ref: str | None = None, decision: str | None = None) -> dict[str, Any]:
     d: dict[str, Any] = {
         "v": PROTOCOL_VERSION, "type": type_, "agent": agent, "id": str(uuid.uuid4()),
         "files": [_clean(f) for f in files],
@@ -101,6 +108,12 @@ def _payload(type_: str, agent: str, files: list[str], text: str, ttl: int | Non
         d["action"] = action
     if branch:
         d["branch"] = _clean(branch)
+    if to:
+        d["to"] = _clean(to)
+    if ref:
+        d["ref"] = _clean(ref)
+    if decision:
+        d["decision"] = decision
     d["ts"] = int(ts)
     return d
 
@@ -108,10 +121,12 @@ def _payload(type_: str, agent: str, files: list[str], text: str, ttl: int | Non
 _ICONS = {"plan": "📝", "lock": "🔒", "release": "🔓", "done": "✅", "context": "💬", "git": "🔀"}
 _KIND_ICONS = {"context": "💬", "defense": "🛡️", "question": "❓"}
 _GIT_ICONS = {"pull": "⬇️", "push": "⬆️", "branch": "🌿", "merge": "🔀"}
+_CONTACT_ICONS = {"request": "🙋", "question": "❓", "info": "📣", "answer": "↩️"}
 
 
 def _human(type_: str, agent: str, files: list[str], text: str, commit: str | None, all_: bool,
-           kind: str | None = None, action: str | None = None, branch: str | None = None) -> str:
+           kind: str | None = None, action: str | None = None, branch: str | None = None,
+           to: str | None = None, decision: str | None = None, mention: int | None = None) -> str:
     shown = ", ".join(f"`{_one_line(f, 60)}`" for f in files[:4])
     if len(files) > 4:
         shown += f", +{len(files) - 4} more"
@@ -146,6 +161,18 @@ def _human(type_: str, agent: str, files: list[str], text: str, commit: str | No
             line += f" — {t}"
         if files:
             line += f" (files: {shown})"
+    elif type_ == "contact":
+        k = kind or "info"
+        who = f"<@{int(mention)}>" if mention else ""
+        if to and to != "all":
+            who = f"{who} (agent `{_one_line(to, 40)}`)".strip()
+        elif to == "all":
+            who = f"{who} everyone".strip()
+        verb = {"request": "asks", "question": "asks", "info": "tells", "answer": "answers"}[k]
+        line = f"{_CONTACT_ICONS[k]} **{a}** {verb} {who}"
+        if decision:
+            line += f" ({decision})"
+        line += f": {t}" + (f" (files: {shown})" if files else "")
     else:
         line = f"{_ICONS['plan']} **{a}** plans: {t}" + (f" (files: {shown})" if files else "")
     return line
@@ -154,7 +181,8 @@ def _human(type_: str, agent: str, files: list[str], text: str, commit: str | No
 def build_messages(type_: str, agent: str, *, files: list[str] | None = None, text: str = "",
                    ttl: int | None = None, commit: str | None = None, all_: bool = False,
                    ts: float | None = None, kind: str | None = None, action: str | None = None,
-                   branch: str | None = None) -> list[tuple[str, dict[str, Any]]]:
+                   branch: str | None = None, to: str | None = None, ref: str | None = None,
+                   decision: str | None = None, mention: int | None = None) -> list[tuple[str, dict[str, Any]]]:
     """Return one or more (content, payload) pairs, each under the safe size limit."""
     if type_ not in TYPES:
         raise ValueError(f"unknown type {type_!r}")
@@ -162,6 +190,12 @@ def build_messages(type_: str, agent: str, *, files: list[str] | None = None, te
         raise ValueError(f"unknown context kind {kind!r}")
     if type_ == "git" and action not in GIT_ACTIONS:
         raise ValueError(f"unknown git action {action!r}")
+    if type_ == "contact":
+        if (kind or "info") not in CONTACT_KINDS:
+            raise ValueError(f"unknown contact kind {kind!r}")
+        if decision is not None and decision not in DECISIONS:
+            raise ValueError(f"unknown decision {decision!r}")
+        to = " ".join((to or "").split())[:MAX_NAME] or None
     if branch is not None:
         branch = " ".join(branch.split())[:MAX_BRANCH]
     files = list(files or [])
@@ -169,8 +203,9 @@ def build_messages(type_: str, agent: str, *, files: list[str] | None = None, te
     text = " ".join(text.split())[:MAX_TEXT] if text else ""
 
     def render(chunk: list[str]) -> tuple[str, dict[str, Any]]:
-        payload = _payload(type_, agent, chunk, text, ttl, commit, all_, ts, kind, action, branch)
-        human = _human(type_, agent, chunk, text, commit, all_, kind, action, branch)
+        payload = _payload(type_, agent, chunk, text, ttl, commit, all_, ts, kind, action, branch,
+                           to, ref, decision)
+        human = _human(type_, agent, chunk, text, commit, all_, kind, action, branch, to, decision, mention)
         return human + "\n" + encode_block(payload), payload
 
     while text and len(render([])[0]) > SAFE_LIMIT - RESERVE:
@@ -237,7 +272,16 @@ def parse_coord(content: str, default_ts: float = 0.0, default_ttl: int | None =
         ts = d.get("ts", default_ts)
         if isinstance(ts, bool) or not isinstance(ts, (int, float)):
             ts = default_ts
-        kind = action = branch = None
+        kind = action = branch = to = ref = decision = None
+        if type_ == "contact":
+            kind = d.get("kind", "info")
+            if kind not in CONTACT_KINDS:
+                return None
+            to = _str(d, "to", MAX_NAME + 20)
+            ref = _str(d, "ref", 64)
+            decision = d.get("decision")
+            if decision is not None and decision not in DECISIONS:
+                return None
         if type_ == "context":
             kind = d.get("kind", "context")
             if kind not in CONTEXT_KINDS:
@@ -248,7 +292,7 @@ def parse_coord(content: str, default_ts: float = 0.0, default_ttl: int | None =
                 return None
             branch = _str(d, "branch", MAX_BRANCH + 20)
         return CoordEvent(type_, agent, uid, tuple(files), text, ttl, commit, all_, float(ts),
-                          kind, action, branch)
+                          kind, action, branch, to, ref, decision)
     except (ValueError, TypeError, RecursionError):
         return None
 
