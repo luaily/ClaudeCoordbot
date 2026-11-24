@@ -1,0 +1,14 @@
+#!/bin/sh
+# Agent wrapper: ./coord status, ./coord lock file --reason "...". Works from any directory.
+SOURCE="$0"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  case "$SOURCE" in /*) ;; *) SOURCE="$DIR/$SOURCE" ;; esac
+done
+DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+if [ ! -x "$DIR/.venv/bin/python" ]; then
+  echo "coordbot is not set up yet: run setup-mac.command first." >&2
+  exit 1
+fi
+PYTHONPATH="$DIR" exec "$DIR/.venv/bin/python" -m coordbot "$@"

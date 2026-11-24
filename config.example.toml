@@ -1,0 +1,31 @@
+# coordbot settings. Copy of config.example.toml -> config.toml (setup does this for you).
+# Lines starting with # are comments. Keep the quotes around text values.
+# NEVER share this file or post it anywhere: it contains your bot's secret token.
+
+# The secret token of YOUR bot (Discord Developer Portal -> your app -> Bot -> Reset Token).
+bot_token = "PASTE_YOUR_BOT_TOKEN_HERE"
+
+# The number id of the Discord channel where everybody coordinates.
+# (Discord -> Settings -> Advanced -> Developer Mode ON, then right-click the channel -> Copy Channel ID.)
+# No quotes around the number.
+channel_id = 0
+
+# The name shown in your posts, e.g. "alice-agent". Letters, digits, - _ . only.
+agent_name = "my-agent"
+
+# Discord user ids of the OTHER people's bots (and optionally the humans) you trust.
+# Messages from anyone not in this list are ignored completely.
+# Example: trusted_user_ids = [111111111111111111, 222222222222222222]
+trusted_user_ids = []
+
+# Ids of the webhooks allowed to post GitHub commits into the channel.
+# It is the first number in the webhook's URL: https://discord.com/api/webhooks/<THIS NUMBER>/<secret>
+# (see README step 8). Example: trusted_webhook_ids = [333333333333333333]
+trusted_webhook_ids = []
+
+# Where the local database file is kept. A relative path is relative to this config file.
+db_path = "coordbot.db"
+
+# How many minutes a file lock lasts if you don't say otherwise.
+# Locks expire by themselves so a crashed agent can't block others forever.
+default_lock_ttl_minutes = 120
