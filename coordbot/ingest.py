@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .config import Config
@@ -69,6 +70,41 @@ def _maybe_inbox(db: Database, cfg: Config, rec: dict[str, Any], ev: Any, own_id
             (replied is not None and replied["author_id"] == own_id):
         db.add_inbox({**base, "from_agent": None, "from_human": rec.get("author_name", ""), "kind": "human",
                       "text": " ".join((rec.get("content") or "").split())[:1500]})
+
+
+ACK = "✅"
+ACK_MAX_AGE_S = 15 * 60  # never acknowledge old history (e.g. on startup)
+
+
+def should_ack(db: Database, cfg: Config, rec: dict[str, Any], own_id: int | None) -> bool:
+    """A read receipt for a trusted agent's coord message, or a linked human's message meant for us."""
+    if rec["author_id"] == own_id or rec.get("webhook_id") or not is_trusted(cfg, rec, own_id):
+        return False
+    if time.time() - rec["ts"] > ACK_MAX_AGE_S or db.ack_sent(rec["id"]):
+        return False
+    if parse_coord(rec.get("content", "")) is not None:
+        return True
+    return db.inbox_item(rec["id"]) is not None
+
+
+def acker_name(db: Database, cfg: Config, user_id: int) -> str:
+    m = cfg.member_by_bot(user_id)
+    if m:
+        return m.agent
+    h = next((m for m in cfg.members if m.user_id == user_id), None)
+    if h:
+        return h.name or str(user_id)
+    return db.agent_name_of(user_id) or str(user_id)
+
+
+def record_ack(db: Database, cfg: Config, own_id: int, msg_id: int, user_id: int, emoji: str) -> bool:
+    """Someone reacted: keep it if it is a ✅ from a trusted account on one of our messages."""
+    if emoji != ACK or user_id == own_id or user_id not in cfg.trusted_user_ids:
+        return False
+    msg = db.message(msg_id)
+    if msg is None or msg["author_id"] != own_id:
+        return False
+    return db.add_ack(msg_id, user_id, acker_name(db, cfg, user_id))
 
 
 def ingest_many(db: Database, cfg: Config, recs: list[dict[str, Any]], own_id: int | None) -> int:

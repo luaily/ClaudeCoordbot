@@ -38,7 +38,8 @@ def say(*parts: Any) -> None:
 
 # View Channel (1<<10) + Send Messages (1<<11) + Read Message History (1<<16)
 # + Create Public Threads (1<<35) + Send Messages in Threads (1<<38)
-INVITE_PERMISSIONS = (1 << 10) | (1 << 11) | (1 << 16) | (1 << 35) | (1 << 38)
+# View Channel, Send Messages, Read Message History, Add Reactions, Create Public Threads, Send in Threads
+INVITE_PERMISSIONS = (1 << 10) | (1 << 11) | (1 << 16) | (1 << 6) | (1 << 35) | (1 << 38)
 THREAD_NAME_MAX = 90
 
 
@@ -99,7 +100,7 @@ def explain(exc: BaseException) -> DiscordProblem:
         return DiscordProblem("Discord rejected the bot token. Check bot_token in ~/.coordbot/config.toml.")
     if isinstance(exc, discord.Forbidden):
         return DiscordProblem("The bot is not allowed to do that in the channel. Give its role View Channel, "
-                              "Send Messages, Read Message History, Create Public Threads and Send Messages "
+                              "Send Messages, Read Message History, Add Reactions, Create Public Threads and Send Messages "
                               "in Threads there.")
     if isinstance(exc, discord.NotFound):
         return DiscordProblem("Discord could not find that channel or message. Check channel_id.")
@@ -175,6 +176,45 @@ class _ChannelOps:
             say(f"Could not open a thread ({type(exc).__name__}). Give the bot 'Create Public Threads' and "
                 "'Send Messages in Threads' in the channel.")
             return None
+
+    async def acknowledge(self, recs: list[dict[str, Any]], db: Database, cfg: Config, own_id: int) -> int:
+        """React ✅ to new trusted messages from others (a read receipt). Never fails the caller."""
+        from .ingest import ACK, should_ack
+
+        sent = 0
+        for rec in recs:
+            if not should_ack(db, cfg, rec, own_id):
+                continue
+            try:
+                where = self.client.get_partial_messageable(rec.get("thread_id") or rec.get("channel_id")
+                                                            or cfg.channel_id)
+                await where.get_partial_message(rec["id"]).add_reaction(ACK)
+                sent += 1
+            except discord.Forbidden:
+                if not getattr(self, "_ack_warned", False):
+                    say("Could not add ✅ read receipts: give the bot 'Add Reactions' in the channel.")
+                    self._ack_warned = True
+            except Exception:  # noqa: BLE001 - receipts are a nicety
+                continue
+            db.mark_ack_sent(rec["id"])
+        return sent
+
+    async def backfill_acks(self, db: Database, cfg: Config, own_id: int, limit: int = 10) -> int:
+        """Read the ✅ reactions on our recent posts (catches acks that came while we were offline)."""
+        from .ingest import ACK, record_ack
+
+        added = 0
+        for m in db.own_recent_messages(own_id, limit=limit):
+            try:
+                where = self.client.get_partial_messageable(m["thread_id"] or m["channel_id"] or cfg.channel_id)
+                msg = await where.fetch_message(m["id"])
+                for r in msg.reactions:
+                    if str(r.emoji) == ACK and r.count > (1 if r.me else 0):
+                        async for u in r.users(limit=50):
+                            added += record_ack(db, cfg, own_id, m["id"], u.id, ACK)
+            except Exception:  # noqa: BLE001
+                continue
+        return added
 
     async def archive_thread(self, thread_id: int) -> None:
         try:
@@ -253,6 +293,18 @@ class GatewaySession(_ChannelOps):
         @client.event
         async def on_message_edit(_before: discord.Message, after: discord.Message) -> None:
             await self._handle(after)
+
+        @client.event
+        async def on_raw_reaction_add(p: discord.RawReactionActionEvent) -> None:
+            from .ingest import record_ack
+
+            if self.own_id and record_ack(self.db, self.cfg, self.own_id, p.message_id, p.user_id, str(p.emoji)):
+                self.touch()
+
+        @client.event
+        async def on_raw_reaction_remove(p: discord.RawReactionActionEvent) -> None:
+            if str(p.emoji) == "✅":
+                self.db.remove_ack(p.message_id, p.user_id)
 
         return client
 
@@ -335,9 +387,18 @@ class GatewaySession(_ChannelOps):
             ingest_many(self.db, self.cfg, recs, self.own_id)
         except discord.HTTPException as exc:
             say(f"Could not read past messages: {explain(exc)}")
+            recs = []
+        self._ack_task = asyncio.ensure_future(self._startup_acks(recs))
         self._start_status()
         say(f"Online as {client.user}, watching #{getattr(channel, 'name', self.cfg.channel_id)}.")
         self.ready.set()
+
+    async def _startup_acks(self, recs: list[dict[str, Any]]) -> None:
+        try:
+            await self.acknowledge(recs, self.db, self.cfg, self.own_id)
+            await self.backfill_acks(self.db, self.cfg, self.own_id)
+        except Exception as exc:  # noqa: BLE001
+            say(f"Read receipts at startup failed: {type(exc).__name__}")
 
     def _ours(self, m: discord.Message) -> bool:
         ch = m.channel
@@ -355,6 +416,7 @@ class GatewaySession(_ChannelOps):
             self.db.bump_last_seen(rec["id"])
         if ingest(self.db, self.cfg, rec, self.own_id):
             self.db.rebuild_locks(self.cfg.default_lock_ttl_minutes)
+            await self.acknowledge([rec], self.db, self.cfg, self.own_id)
             if rec["author_id"] != self.own_id:
                 self.touch()  # other agents talking counts as activity
                 if self._on_message:

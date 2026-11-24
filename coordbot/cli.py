@@ -95,6 +95,20 @@ class Ctx:
                     recs.extend(got)
                     self.db.set_meta(key, str(max(r["id"] for r in got)))
         ingest_many(self.db, self.cfg, recs, self.own_id)
+        acknowledge = getattr(self.session, "acknowledge", None)
+        if acknowledge is not None and recs:
+            await acknowledge(recs, self.db, self.cfg, self.own_id)  # ✅ read receipts
+
+    async def refresh_acks(self) -> None:
+        """A live gateway records ✅ as they happen; a one-off CLI session reads them from Discord."""
+        backfill = getattr(self.session, "backfill_acks", None)
+        if backfill is not None and not getattr(self.session, "online", False):
+            await backfill(self.db, self.cfg, self.own_id)
+
+    def acks_line(self, msg_ids: list[int]) -> tuple[list[str], str]:
+        acks = self.db.acks_for(msg_ids)
+        who = sorted({a for i in msg_ids for a in acks.get(i, [])})
+        return who, ("✅ seen by " + ", ".join(who)) if who else "no ✅ yet"
 
     async def _send(self, content: str, reply_to: int | None, thread_id: int | None,
                     mention_ids: list[int] | None = None) -> dict[str, Any]:
@@ -438,6 +452,16 @@ async def cmd_status(ctx: Ctx, args: argparse.Namespace) -> int:
     lines.append("Latest commits:" if commits else "Latest commits: none seen")
     for c in commits:
         lines.append(f"  {c.sha[:7]} {c.message} - {c.author} ({c.branch}) {ago(c.ts, now)}")
+    await ctx.refresh_acks()
+    own = ctx.db.own_actions(5)
+    if own:
+        lines.append("Your recent posts (✅ = another agent's bot received it):")
+        data["your_posts"] = []
+        for r in own:
+            who, text = ctx.acks_line([r["msg_id"]])
+            data["your_posts"].append({"type": r["type"], "summary": r["summary"], "ts": int(r["ts"]),
+                                       "message_id": r["msg_id"], "seen_by": who})
+            lines.append(f"  [{r['type']}] {ago(r['ts'], now)}: {r['summary'][:80]} ({text})")
     notes = setup_notes(ctx.cfg, ctx.own_id)
     lines += [f"Setup: {n}" for n in notes]
     ctx.emit(data, "\n".join(lines))
@@ -483,11 +507,15 @@ async def cmd_wait(ctx: Ctx, args: argparse.Namespace) -> int:
 
 
 async def cmd_log(ctx: Ctx, args: argparse.Namespace) -> int:
+    await ctx.refresh_acks()
     rows = ctx.db.own_actions(args.n)
+    acks = ctx.db.acks_for([r["msg_id"] for r in rows])
     data = [{"type": r["type"], "summary": r["summary"], "files": json.loads(r["files"]),
-             "commit": r["commit_sha"], "ts": int(r["ts"]), "message_id": r["msg_id"]} for r in rows]
+             "commit": r["commit_sha"], "ts": int(r["ts"]), "message_id": r["msg_id"],
+             "seen_by": acks.get(r["msg_id"], [])} for r in rows]
     now = time.time()
     text = "\n".join(f"{ago(d['ts'], now)} [{d['type']}] {d['summary']} {', '.join(d['files'][:3])}".rstrip()
+                     + (f" (✅ {', '.join(d['seen_by'])})" if d["seen_by"] else "")
                      for d in data) or "No actions recorded yet."
     ctx.emit({"ok": True, "actions": data}, text)
     return OK

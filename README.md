@@ -6,6 +6,7 @@
 - **A project needs only a `.coordbot/` folder** with a `team.toml` (channel and trusted bots, no secrets), plus a `.mcp.json`. Nothing else is copied into the project.
 - **Threads and replies.** Each task gets a Discord thread. Unlocks are posted as replies to the lock they release.
 - **People, not just agents.** Each person links their own Discord account with a local browser login. After that, an agent can reach another agent *and ping the human who runs it* to sort out a conflict together. The human always approves what their agent sends, and incoming messages show up in their agent's results right away.
+- **Read receipts.** When an agent's bot receives another agent's post, it reacts ✅. The posting bot records who saw what, so `status` and `log` show "✅ seen by …". You can see coordbot working in Discord even while your agent is quiet.
 - **Git etiquette.** A preflight check warns about conflict risk, files others have locked and large pushes before any pull or push. Agents show the warnings to their user.
 - Everyone runs their **own Discord bot**. Only bots listed in the team file are trusted. Everything else in the channel is ignored.
 
@@ -105,7 +106,7 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/) (it insta
    ```
    uvx --from git+https://github.com/luaily/ClaudeCoordbot coordbot doctor
    ```
-   It prints your bot's id and its invite link. Open the link, pick the server and click Authorize. In a private channel, give the bot these permissions: View Channel, Send Messages, Read Message History, Create Public Threads and Send Messages in Threads.
+   It prints your bot's id and its invite link. Open the link, pick the server and click Authorize. In a private channel, give the bot these permissions: View Channel, Send Messages, Read Message History, Add Reactions, Create Public Threads and Send Messages in Threads.
 5. **Join the project.** Add your bot's id to `trusted_user_ids` in the project's `.coordbot/team.toml`, then commit and push.
 6. **Start your agent** in the project folder and approve the `coordbot` MCP server.
 
@@ -189,6 +190,7 @@ Once you're linked:
 | `Discord rejected the bot token` | Reset the token in the Developer Portal and paste the new one. |
 | `Message Content Intent is off` | Turn it on in the Developer Portal (Bot page) and save. |
 | `not allowed to see that channel` | Invite the bot with the link `coordbot doctor` prints. |
+| `Could not add ✅ read receipts` | Give the bot's role Add Reactions in the channel. |
 | `Could not open a thread` | Give the bot's role Create Public Threads and Send Messages in Threads. |
 | Other agents' messages never show up | Their bot ids must be in `trusted_user_ids` in `team.toml`. |
 | `coordbot link`: "Invalid OAuth2 redirect_uri" | Add `http://127.0.0.1:53682/callback` under OAuth2 → Redirects on your bot's page, save, and try again. |

@@ -183,3 +183,18 @@ def test_blocked_names_the_holder(tmp_path):
     b.capture = True
     assert run(cli.cmd_lock(b, args(files=["src/x"], reason="r", ttl=None))) == 2
     assert b.result["holders"] == [{"agent": "a", "human": "Alice", "user_id": 101}]
+
+
+def test_status_shows_acks(tmp_path):
+    ch = Channel()
+    a = make(tmp_path, "a", 1, ch)
+    assert run(cli.cmd_plan(a, args(summary="roof", files=[]))) == 0
+    msg = ch.msgs[0]["id"]
+    from coordbot.ingest import ACK, record_ack
+    assert record_ack(a.db, a.cfg, 1, msg, 2, ACK)
+    a.capture = True
+    assert run(cli.cmd_status(a, args())) == 0
+    assert a.result["your_posts"][0]["seen_by"] == ["2"]
+    assert "seen by" in a.text
+    assert run(cli.cmd_log(a, args(n=5))) == 0
+    assert a.result["actions"][0]["seen_by"]

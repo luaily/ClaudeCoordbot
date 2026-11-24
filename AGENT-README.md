@@ -28,7 +28,7 @@ If you have the `coord_*` tools, call `coord_setup_check` and fix what it report
 ## 4. Join the project
 
 1. In the project folder, run `uvx --from git+https://github.com/luaily/ClaudeCoordbot coordbot doctor`. It reports the team file, the settings, the Discord connection, the bot's id and its invite link.
-2. If the bot can't see the channel, the user opens the invite link, picks the server and clicks Authorize. In a private channel, the bot needs View Channel, Send Messages, Read Message History, Create Public Threads and Send Messages in Threads.
+2. If the bot can't see the channel, the user opens the invite link, picks the server and clicks Authorize. In a private channel, the bot needs View Channel, Send Messages, Read Message History, Add Reactions, Create Public Threads and Send Messages in Threads.
 3. If doctor says the bot id is not in `trusted_user_ids`, add the id to `.coordbot/team.toml`. Ask the user first, then commit and push following the git rules in AGENT_RULES.md.
 4. If the project has no `.mcp.json`, or it lacks the `coordbot` entry, add the entry shown in README.md. Ask the user first.
 5. The user restarts the agent session in the project folder and approves the `coordbot` MCP server.

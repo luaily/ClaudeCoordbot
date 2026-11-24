@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS inbox (
   msg_id INTEGER PRIMARY KEY, from_id INTEGER, from_agent TEXT, from_human TEXT, kind TEXT,
   text TEXT, ref TEXT, uid TEXT, decision TEXT, files TEXT, thread_id INTEGER, ts REAL,
   delivered INTEGER DEFAULT 0, handled INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS acks (
+  msg_id INTEGER, by_id INTEGER, agent TEXT, ts REAL, PRIMARY KEY (msg_id, by_id));
+CREATE TABLE IF NOT EXISTS acks_sent (msg_id INTEGER PRIMARY KEY, ts REAL);
 CREATE TABLE IF NOT EXISTS threads (
   root_msg_id INTEGER PRIMARY KEY, thread_id INTEGER, author_id INTEGER, ts REAL, closed INTEGER DEFAULT 0);
 """
@@ -235,6 +238,47 @@ class Database:
     def message(self, msg_id: int) -> dict[str, Any] | None:
         r = self.conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
         return dict(r) if r else None
+
+    # acknowledgements (✅ reactions): ones we received on our posts, and ones we sent
+    def add_ack(self, msg_id: int, by_id: int, agent: str, ts: float | None = None) -> bool:
+        with self.conn:
+            cur = self.conn.execute("INSERT OR IGNORE INTO acks (msg_id, by_id, agent, ts) VALUES (?,?,?,?)",
+                                    (msg_id, by_id, agent, ts or time.time()))
+        return cur.rowcount > 0
+
+    def remove_ack(self, msg_id: int, by_id: int) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM acks WHERE msg_id=? AND by_id=?", (msg_id, by_id))
+
+    def acks_for(self, msg_ids: list[int]) -> dict[int, list[str]]:
+        if not msg_ids:
+            return {}
+        q = ",".join("?" * len(msg_ids))
+        out: dict[int, list[str]] = {}
+        for r in self.conn.execute(f"SELECT msg_id, agent FROM acks WHERE msg_id IN ({q}) ORDER BY ts", msg_ids):
+            out.setdefault(int(r["msg_id"]), []).append(r["agent"])
+        return out
+
+    def ack_sent(self, msg_id: int) -> bool:
+        return self.conn.execute("SELECT 1 FROM acks_sent WHERE msg_id=?", (msg_id,)).fetchone() is not None
+
+    def mark_ack_sent(self, msg_id: int) -> None:
+        with self.conn:
+            self.conn.execute("INSERT OR IGNORE INTO acks_sent (msg_id, ts) VALUES (?,?)", (msg_id, time.time()))
+
+    def own_recent_messages(self, own_id: int, max_age_s: float = 86400, limit: int = 10) -> list[dict[str, Any]]:
+        rows = self.conn.execute("SELECT id, channel_id, thread_id FROM messages WHERE author_id=? AND ts > ?"
+                                 " ORDER BY id DESC LIMIT ?", (own_id, time.time() - max_age_s, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def agent_name_of(self, author_id: int) -> str | None:
+        r = self.conn.execute("SELECT agent FROM events WHERE author_id=? ORDER BY msg_id DESC LIMIT 1",
+                              (author_id,)).fetchone()
+        if r:
+            return str(r["agent"])
+        r = self.conn.execute("SELECT author_name FROM messages WHERE author_id=? ORDER BY id DESC LIMIT 1",
+                              (author_id,)).fetchone()
+        return str(r["author_name"]) if r else None
 
     def own_actions(self, limit: int) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM own_actions ORDER BY msg_id DESC LIMIT ?", (limit,)).fetchall()

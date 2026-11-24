@@ -101,5 +101,5 @@ async def doctor_report(config_path: Path | None = None, project: Path | None = 
             lines.append(f"Your bot id {own_id} is NOT in trusted_user_ids in {team.path}: teammates ignore your "
                          "posts. Add it there, commit and push it (tell your user first).")
     lines.append("The bot's role needs: View Channel, Send Messages, Read Message History, "
-                 "Create Public Threads, Send Messages in Threads.")
+                 "Add Reactions, Create Public Threads, Send Messages in Threads.")
     return ready, lines

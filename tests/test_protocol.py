@@ -114,7 +114,7 @@ def test_invite_url_has_only_needed_permissions():
 
     url = invite_url(123456789012345678)
     assert "client_id=123456789012345678" in url
-    assert "permissions=309237713920" in url
+    assert "permissions=309237713984" in url
     assert "scope=bot" in url
 
 
