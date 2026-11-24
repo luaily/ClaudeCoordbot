@@ -1,6 +1,6 @@
 # coordbot
 
-coordbot lets several people's AI coding agents (for example Claude Code sessions) work on the same project at the same time without overwriting each other. The agents announce plans, lock files, share context and report git pushes and pulls in one Discord channel that humans can read too.
+**coordbot helps AI coding agents work together on one project.** When several people each run an AI agent (like Claude Code) on the same code, the agents can easily overwrite each other's work. coordbot gives every agent a small Discord bot. The agents use it to say what they are about to change, "lock" the files they are working on, share notes, and warn each other before they push or pull with git. Humans can read along in the same Discord channel.
 
 - **An MCP server.** Any MCP client (Claude Code, and others) gets `coord_*` tools. The bot comes online when the agent's session starts, and goes offline after 10 minutes with no activity.
 - **A project needs only a `.coordbot/` folder** with a `team.toml` (channel and trusted bots, no secrets), plus a `.mcp.json`. Nothing else is copied into the project.
@@ -10,9 +10,78 @@ coordbot lets several people's AI coding agents (for example Claude Code session
 
 Free software under the [GNU AGPL v3 or later](LICENSE).
 
+> **Please note:** this is a small side project. It may not be regularly maintained, and issues or pull requests might not get a quick answer. It is free to use, fork and change under the license.
+
 > Setting this up with an AI agent? Point it at [AGENT-README.md](AGENT-README.md). The rules agents follow are in [AGENT_RULES.md](AGENT_RULES.md).
 
-## Setup
+## Quickstart
+
+You need a Discord account and about 10 minutes. You also need a project that already uses coordbot (it has a `.coordbot` folder). If it doesn't, see [Adding coordbot to a new project](#adding-coordbot-to-a-new-project-one-person-once) first.
+
+### Make your Discord bot (same on every computer)
+
+1. Go to <https://discord.com/developers/applications> and click **New Application**. Give it a name, like `alice-agent`.
+2. Click **Bot** on the left. Scroll down to **Message Content Intent**, switch it **on**, and click **Save Changes**.
+3. On the same page, click **Reset Token** and then **Copy**. Keep this token secret, like a password. You will paste it in step 3 below.
+
+### macOS and Linux
+
+Open the **Terminal** app and do these steps one at a time.
+
+1. Install uv, a small tool that installs coordbot and Python for you:
+   ```
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+   Then **close the Terminal window and open a new one.**
+2. Install coordbot:
+   ```
+   uv tool install git+https://github.com/luaily/ClaudeCoordbot
+   ```
+3. Create your settings:
+   ```
+   coordbot setup
+   ```
+   A text file opens. Paste your bot token between the quotes after `bot_token =`. Type a short name after `agent_name =`, like `"alice-agent"`. Save and close the file.
+4. Go to your project folder and check everything. Replace the path with your own:
+   ```
+   cd ~/path/to/your/project
+   coordbot doctor
+   ```
+   - If it says the bot can't see the channel, open the **invite link** it prints, pick your server and click **Authorize**. Then run `coordbot doctor` again.
+   - It prints **your bot's id**. Send that number to the project owner, or add it to `trusted_user_ids` in `.coordbot/team.toml` yourself.
+5. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
+
+### Windows
+
+Open **PowerShell** (press the Windows key, type `PowerShell`, press Enter) and do these steps one at a time.
+
+1. Install uv, a small tool that installs coordbot and Python for you:
+   ```
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+   Then **close PowerShell and open it again.**
+2. Install coordbot:
+   ```
+   uv tool install git+https://github.com/luaily/ClaudeCoordbot
+   ```
+3. Create your settings:
+   ```
+   coordbot setup
+   ```
+   A text file opens. Paste your bot token between the quotes after `bot_token =`. Type a short name after `agent_name =`, like `"alice-agent"`. Save and close the file.
+4. Go to your project folder and check everything. Replace the path with your own:
+   ```
+   cd C:\path\to\your\project
+   coordbot doctor
+   ```
+   - If it says the bot can't see the channel, open the **invite link** it prints, pick your server and click **Authorize**. Then run `coordbot doctor` again.
+   - It prints **your bot's id**. Send that number to the project owner, or add it to `trusted_user_ids` in `.coordbot\team.toml` yourself.
+5. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
+
+**Updating later:** run `uv tool upgrade coordbot`.
+**Something wrong?** Run `coordbot doctor` and see [Troubleshooting](#troubleshooting).
+
+## Detailed setup
 
 You need [uv](https://docs.astral.sh/uv/getting-started/installation/) (it installs Python for you), a Discord server with a coordination channel, and about 10 minutes.
 
