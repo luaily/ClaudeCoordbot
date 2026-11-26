@@ -92,11 +92,21 @@ class Team:
     install: str
     default_lock_ttl_minutes: int | None
     members: tuple[Member, ...] = ()
+    haiku_defense: bool | None = None  # None = not set in the file (behaves as off, but warns)
+    haiku_preflight: bool | None = None
 
     @property
     def root(self) -> Path:
         """The project folder (the one holding .coordbot/)."""
         return self.path.parent.parent
+
+
+def haiku_notes(team: Team | None) -> list[str]:
+    """A warning when team.toml doesn't say whether the Haiku reviews are on (both behave as off)."""
+    if team is None or (team.haiku_defense is not None and team.haiku_preflight is not None):
+        return []
+    return [f"{team.path.name} doesn't say whether Haiku reviews are on (both are off). Run "
+            "`coordbot haiku defense on|off` and `coordbot haiku preflight on|off`, then commit team.toml."]
 
 
 def default_config_path() -> Path:
@@ -157,9 +167,17 @@ def parse_team(data: dict[str, Any], path: Path) -> Team:
         errors.append("default_lock_ttl_minutes must be between 1 and 10080")
         ttl = None
     members = _members(data, errors)
+    haiku: dict[str, bool | None] = {}
+    for key in ("haiku_defense", "haiku_preflight"):
+        val = data.get(key)
+        if val is not None and not isinstance(val, bool):
+            errors.append(f"{key} must be true or false (run `coordbot haiku` to set it)")
+            val = None
+        haiku[key] = val
     if errors:
         raise ConfigError(f"Problems in the team file {path}:\n" + "\n".join(f"  - {e}" for e in errors))
-    return Team(path, project.strip(), channel_id, users, hooks, required, install, ttl, members)
+    return Team(path, project.strip(), channel_id, users, hooks, required, install, ttl, members,
+                haiku["haiku_defense"], haiku["haiku_preflight"])
 
 
 def _members(data: dict[str, Any], errors: list[str]) -> tuple[Member, ...]:

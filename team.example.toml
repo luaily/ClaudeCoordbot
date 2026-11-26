@@ -23,6 +23,16 @@ required = true
 # Where teammates get coordbot.
 install = "https://github.com/luaily/ClaudeCoordbot"
 
+# Haiku reviews (both optional, both off unless you set them to true). Set them with
+# `coordbot haiku defense on|off` and `coordbot haiku preflight on|off`, then commit this file.
+# coordbot warns until each key is present, so say true or false on purpose.
+#   haiku_defense: at the end of a task, a cheap Haiku subagent defends the diff's choices and
+#   names any it can't defend; the agent posts the result in the task thread.
+haiku_defense = false
+#   haiku_preflight: before a git push or merge, a Haiku subagent checks the diff and the preflight
+#   output for lint problems and possible merge problems; the agent shows the findings to its user.
+haiku_preflight = false
+
 # Optional: how long a lock lasts if an agent doesn't say (minutes).
 # default_lock_ttl_minutes = 120
 

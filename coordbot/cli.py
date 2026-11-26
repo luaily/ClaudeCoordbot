@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__, ui
-from .config import Config, ConfigError, load_config
+from .config import Config, ConfigError, haiku_notes, load_config
 from .db import Database
 from .discord_client import DiscordProblem, RestSession, run_gateway
 from .gitcheck import preflight
@@ -25,6 +25,18 @@ POSTING = {"plan", "lock", "done", "release", "context", "git", "contact", "repl
 LOCAL_ONLY = {"preflight"}  # commands that work without Discord
 APPROVAL_NEEDED = ("Your user must approve this message first. Show them exactly what will be sent and to whom; "
                    "only if they say yes, run again with --user-approved.")
+
+
+HAIKU_DEFENSE_RULE = ("At the end of each task, start a Haiku subagent. Give it your diff and your reasons. "
+                      "Its job: defend your choices, and name any choice it cannot defend. Tell your user what "
+                      "it found. Then post its defense with coord_context kind=\"defense\".")
+HAIKU_PREFLIGHT_RULE = ("After coord_git_preflight and before a git push or merge, start a Haiku subagent. Give it "
+                        "the diff and the preflight output (incoming upstream changes, overlapping files, files "
+                        "others locked). It checks for lint problems (it runs the project's linter or formatter "
+                        "if one is configured, otherwise it reads for obvious problems) and for possible merge "
+                        "problems (textual conflicts, and semantic clashes with incoming changes, such as a "
+                        "renamed function that is still called). Show its findings to your user before you "
+                        "push. Post nothing to Discord unless your user asks.")
 
 
 class UsageProblem(Exception):
@@ -69,6 +81,18 @@ def lock_line(lk: Lock, now: float) -> str:
     why = f' "{lk.reason}"' if lk.reason else ""
     return (f"{lk.file} - {ui.value(lk.agent)}{why} - since {ago(lk.ts, now)}, "
             f"expires {until(lk.expires_ts, now)}")
+
+
+def haiku_state(team: Any) -> dict[str, Any]:
+    """The repo's Haiku switches (None = not set, which behaves as off), with the rule for each one that is on."""
+    d, p = (getattr(team, "haiku_defense", None), getattr(team, "haiku_preflight", None))
+    out: dict[str, Any] = {"defense": d, "preflight": p}
+    if d:
+        out["defense_rule"] = HAIKU_DEFENSE_RULE
+    if p:
+        out["preflight_rule"] = HAIKU_PREFLIGHT_RULE
+    return out
+
 
 class Ctx:
     """Everything a command needs. With capture=True (MCP), output is collected instead of printed."""
@@ -425,6 +449,9 @@ async def cmd_preflight(ctx: Ctx, args: argparse.Namespace) -> int:
              f"{pf.ahead} ahead, {pf.behind} behind."]
     lines += [ui.warn(w) for w in pf.warnings] + [ui.info(a) for a in pf.advice]
     data = {"ok": pf.ok and not pf.overlap_files and not pf.locked_by_others, **pf.to_dict()}
+    if ctx.cfg.team is not None and ctx.cfg.team.haiku_preflight:
+        data["haiku_check"] = HAIKU_PREFLIGHT_RULE
+        lines.append(ui.info("Haiku preflight is on: " + HAIKU_PREFLIGHT_RULE))
     ctx.emit(data, ui.lines(lines))
     return CONFLICT if (pf.overlap_files or pf.locked_by_others) else (OK if pf.ok else ERR)
 
@@ -442,6 +469,7 @@ async def cmd_status(ctx: Ctx, args: argparse.Namespace) -> int:
                     "commit": e["commit_sha"], "ts": int(e["ts"])} for e in evs],
         "task_thread": ctx.task_thread(),
         "setup": setup_notes(ctx.cfg, ctx.own_id),
+        "haiku": haiku_state(ctx.cfg.team),
         "commits": [c.__dict__ for c in ctx.db.recent_commits(5)],
     }
     lock_rows = ["  " + lock_line(l, now) + (ui.dim(" [yours]") if l.author_id == ctx.own_id else "") for l in locks]
@@ -491,7 +519,7 @@ def setup_notes(cfg: Config, own_id: int) -> list[str]:
                      f"your posts until it is added there and committed.")
     if not team.trusted_webhook_ids:
         notes.append("no GitHub webhook is trusted in the team file, so commits aren't tracked.")
-    return notes
+    return notes + haiku_notes(team)
 
 
 async def cmd_commits(ctx: Ctx, args: argparse.Namespace) -> int:
@@ -562,6 +590,11 @@ def build_parser() -> argparse.ArgumentParser:
         return sub.add_parser(name, parents=[common], help=help_, description=help_)
 
     add("setup", "create your personal config (~/.coordbot/config.toml) and open it")
+    s = add("haiku", "show or set this project's Haiku review switches (written to .coordbot/team.toml)")
+    s.add_argument("which", nargs="?", choices=["defense", "preflight"],
+                   help="defense: Haiku defends the diff at the end of a task; preflight: Haiku checks lint and "
+                        "merge problems before a push or merge")
+    s.add_argument("state", nargs="?", choices=["on", "off"])
     add("doctor", "check your setup: settings, team file, bot id, permissions")
     add("mcp", "run as an MCP server for AI agents (stdio)")
     add("run", "keep the bot online and recording; goes offline after idle_minutes with no activity")
@@ -694,6 +727,45 @@ def fail(msg: str, as_json: bool = False) -> int:
     return ERR
 
 
+def haiku_command(args: argparse.Namespace, as_json: bool) -> int:
+    """`coordbot haiku [defense|preflight] [on|off]`: show or set the project's Haiku switches."""
+    from .config import ConfigError as _CE, load_team
+    from .oauth import LinkProblem, set_team_bool
+
+    try:
+        team = load_team(args.project)
+    except _CE as exc:
+        return fail(str(exc), as_json)
+    if team is None:
+        return fail("No .coordbot/team.toml here: run this inside the project folder.", as_json)
+    if args.which is None:
+        state = {"defense": team.haiku_defense, "preflight": team.haiku_preflight}
+        label = {None: "not set (off)", True: "on", False: "off"}
+        rows = [ui.kv(f"haiku_{k}", label[v]) for k, v in state.items()]
+        notes = [ui.warn(n) for n in haiku_notes(team)]
+        if as_json:
+            print(json.dumps({"ok": True, **state, "warnings": haiku_notes(team)}))
+        else:
+            print(ui.lines([ui.header("Haiku reviews"), *rows, *notes]))
+        return OK
+    if args.state is None:
+        return fail(f"Say on or off: coordbot haiku {args.which} on|off", as_json)
+    key, val = f"haiku_{args.which}", args.state == "on"
+    try:
+        changed = set_team_bool(team.path, key, val)
+    except (LinkProblem, OSError, ValueError) as exc:
+        return fail(f"Could not update {team.path}: {exc}", as_json)
+    rel = team.path.relative_to(team.root) if team.path.is_relative_to(team.root) else team.path
+    msg = (f"{key} is now {args.state} in {ui.value(rel)}." if changed
+           else f"{key} was already {args.state} in {ui.value(rel)}.")
+    if as_json:
+        print(json.dumps({"ok": True, "key": key, "value": val, "changed": changed, "team_file": str(team.path)}))
+    else:
+        print(ui.ok(msg) + ("\n" + ui.info("Commit and push the team file so teammates get the same setting.")
+                            if changed else ""))
+    return OK
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     as_json = bool(getattr(args, "json", False))
@@ -703,6 +775,8 @@ def main(argv: list[str] | None = None) -> int:
         from .setup import run_setup
 
         return run_setup(args.config)
+    if args.command == "haiku":
+        return haiku_command(args, as_json)
     if args.command == "doctor":
         from .setup import doctor_report, render_report
 

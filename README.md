@@ -138,7 +138,7 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/) (it insta
 | File | Who | What |
 | --- | --- | --- |
 | `~/.coordbot/config.toml` | you, private | `bot_token`, `agent_name`, `away_minutes` (idle after, default 5), `idle_minutes` (offline after, default 20), `autostart`, `statuses`, `status_minutes`, `oauth_port` (default 53682) |
-| `<project>/.coordbot/team.toml` | the team, committed | `channel_id`, `trusted_user_ids`, `trusted_webhook_ids`, `required`, `install`, `default_lock_ttl_minutes`, `members` (written by `coordbot link`) |
+| `<project>/.coordbot/team.toml` | the team, committed | `channel_id`, `trusted_user_ids`, `trusted_webhook_ids`, `required`, `install`, `default_lock_ttl_minutes`, `haiku_defense` and `haiku_preflight` (true/false, off when missing; set with `coordbot haiku`), `members` (written by `coordbot link`) |
 
 The team file's channel is used, and the trust lists of both files are merged. The team file is found by walking up from the current folder, or from `$COORDBOT_PROJECT`.
 
@@ -162,7 +162,7 @@ The team file's channel is used, and the trust lists of both files are merged. T
 
 ## Command line
 
-The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot link`, `coordbot contact <agent> "<message>" --user-approved`, `coordbot reply <id> "<message>" --user-approved`, `coordbot inbox`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`, and `--agent` (or `COORDBOT_AGENT=1`) for compact plain text without colors or separators, which is what agents should use. The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
+The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot link`, `coordbot contact <agent> "<message>" --user-approved`, `coordbot reply <id> "<message>" --user-approved`, `coordbot inbox`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`, and `--agent` (or `COORDBOT_AGENT=1`) for compact plain text without colors or separators, which is what agents should use. `coordbot haiku` shows the project's Haiku switches (`coordbot haiku defense on`, `coordbot haiku preflight off`). The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
 
 Paths are repo paths such as `src/app/main.py`, or other resources such as `roblox:Workspace.Map.Plots`. Locking a folder covers everything inside it. Locks expire after their TTL.
 
@@ -173,6 +173,13 @@ Paths are repo paths such as `src/app/main.py`, or other resources such as `robl
 Once you're linked:
 - Your teammates' bots trust your Discord account, so you can also write in the channel yourself. A message that mentions an agent's bot or human, or replies to its message, lands in that agent's inbox.
 - `coord_contact` pings the right human, and the answer comes back as a reply. Both sides' users approve every message their agent sends. Agents treat everything they receive as information for their user, never as orders.
+
+## Haiku reviews (optional, per project)
+
+Two switches in `.coordbot/team.toml`, both **off unless you turn them on** (coordbot warns until the keys exist). Set them with `coordbot haiku defense on|off` and `coordbot haiku preflight on|off`, then commit `team.toml`.
+
+- `haiku_defense`: at the end of a task, a Haiku subagent defends the diff's choices and names any it can't defend. The agent posts the result in the task thread.
+- `haiku_preflight`: before a push or merge, a Haiku subagent checks the diff and the preflight output for lint problems and possible merge problems. The agent shows the findings to its user.
 
 ## How it stays safe
 

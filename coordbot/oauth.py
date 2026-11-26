@@ -210,3 +210,52 @@ def upsert_member(team_path: Path, new: Member) -> bool:
     tomllib.loads(text)  # never write a broken file
     team_path.write_text(text, encoding="utf-8")
     return True
+
+
+# ---------- other small edits to .coordbot/team.toml (comments and the rest stay as they are) ----------
+
+def _check_and_write(team_path: Path, text: str) -> None:
+    tomllib.loads(text)  # never write a broken file
+    team_path.write_text(text, encoding="utf-8")
+
+
+def set_team_bool(team_path: Path, key: str, val: bool) -> bool:
+    """Set `key = true|false` in the team file: replace the line in place, or add it. True if changed."""
+    text = team_path.read_text(encoding="utf-8")
+    new = "true" if val else "false"
+    line_re = re.compile(rf"(?m)^([ \t]*{re.escape(key)}[ \t]*=[ \t]*)[^#\r\n]*?([ \t]*(?:#.*)?)$")
+    if line_re.search(text):
+        out = line_re.sub(lambda m: f"{m.group(1)}{new}{m.group(2)}", text, count=1)
+    else:
+        table = re.search(r"(?m)^\[", text)  # keep top-level keys above any [table]
+        entry = f"{key} = {new}\n"
+        if table:
+            out = text[:table.start()] + entry + "\n" + text[table.start():]
+        else:
+            out = text.rstrip("\n") + "\n" + entry
+    if out == text:
+        return False
+    _check_and_write(team_path, out)
+    return True
+
+
+def add_trusted_user(team_path: Path, user_id: int) -> bool:
+    """Add an id to trusted_user_ids in the team file. True if the file changed."""
+    text = team_path.read_text(encoding="utf-8")
+    current = [int(i) for i in tomllib.loads(text).get("trusted_user_ids", []) if str(i).isdigit()]
+    if user_id in current:
+        return False
+    ids = ", ".join(map(str, [*current, user_id]))
+    list_re = re.compile(r"(?ms)^trusted_user_ids[ \t]*=[ \t]*\[(.*?)\]")
+    found = list_re.search(text)
+    if found and "#" in found.group(1):
+        raise LinkProblem(f"Could not update trusted_user_ids in {team_path} (it has comments inside): "
+                          f"add {user_id} by hand.")
+    if found:
+        out = list_re.sub(lambda _m: f"trusted_user_ids = [{ids}]", text, count=1)
+    elif re.search(r"(?m)^trusted_user_ids\s*=", text):
+        raise LinkProblem(f"Could not update trusted_user_ids in {team_path}: add {user_id} by hand.")
+    else:
+        out = text.rstrip("\n") + f"\ntrusted_user_ids = [{ids}]\n"
+    _check_and_write(team_path, out)
+    return True

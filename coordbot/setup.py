@@ -10,7 +10,7 @@ from importlib import resources
 from pathlib import Path
 
 from . import ui
-from .config import ConfigError, default_config_path, load_config
+from .config import ConfigError, default_config_path, haiku_notes, load_config
 
 
 class Line(str):
@@ -91,6 +91,9 @@ async def doctor_report(config_path: Path | None = None, project: Path | None = 
     else:
         lines.append(Line(f"Team file: {team.path} (project {team.project}, channel {team.channel_id}, "
                           f"required={str(team.required).lower()}).", "ok"))
+        lines += [Line(f"Haiku reviews: defense {_onoff(team.haiku_defense)}, preflight "
+                       f"{_onoff(team.haiku_preflight)}.", "info")]
+        lines += [Line(n, "warn") for n in haiku_notes(team)]
     if not path.is_file():
         install = team.install if team else "https://github.com/luaily/ClaudeCoordbot"
         return False, lines + [Line(f"No personal settings at {path}. Run `coordbot setup`, paste your bot token "
@@ -120,6 +123,11 @@ async def doctor_report(config_path: Path | None = None, project: Path | None = 
     lines.append(Line("The bot's role needs: View Channel, Send Messages, Read Message History, "
                       "Add Reactions, Create Public Threads, Send Messages in Threads."))
     return ready, lines
+
+
+def _onoff(v: bool | None) -> str:
+    return "unset (off)" if v is None else ("on" if v else "off")
+
 
 def render_report(ready: bool, lines: list[Line]) -> str:
     """The doctor report as terminal text (colored for humans, compact for --agent)."""

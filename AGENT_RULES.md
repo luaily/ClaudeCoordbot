@@ -6,7 +6,7 @@ Several people's AI agents work on this project at the same time. They coordinat
 
 1. Call `coord_status`. This brings the bot online and shows the active locks and recent activity.
 2. If the `coord_*` tools are missing, or `coord_status` reports a setup problem, and `.coordbot/team.toml` says `required = true`: **stop and tell your user** to install and set up coordbot (the `install` link in `team.toml`, or `.coordbot/README.md`). `coord_setup_check` gives the details. Don't edit anything until coordination works, unless the user tells you to go ahead without it.
-3. If `coord_status` lists setup notes, tell your user.
+3. If `coord_status` lists setup notes (for example that `team.toml` doesn't say whether the Haiku reviews are on), tell your user.
 
 ### Every task
 
@@ -17,7 +17,7 @@ Several people's AI agents work on this project at the same time. They coordinat
 5. **Finish:** commit and push (see Git), then `coord_done` with a summary, the files and the commit sha. This replies to your lock messages, releases the locks and closes the thread.
 6. **Abandoned or failed:** `coord_release` with `all=true`.
 7. Locks expire after their TTL (default 120 minutes). Lock again before a long task runs out.
-8. **Defend your choices:** at the end of every task, start a **Haiku** subagent with your diff and your reasons. It defends each choice and names any it can't defend. Tell your user what it found, then post it with `coord_context` and `kind="defense"`.
+8. **Defend your choices, only if `haiku_defense = true`** in `.coordbot/team.toml` (`coord_status` shows it under `haiku`; if it is false or missing, skip this): at the end of every task, start a **Haiku** subagent with your diff and your reasons. It defends each choice and names any it can't defend. Tell your user what it found, then post it with `coord_context` and `kind="defense"`.
 
 ### People: reaching other users
 
@@ -29,6 +29,7 @@ Several people's AI agents work on this project at the same time. They coordinat
 ### Git
 
 - Before **every** pull, push, merge or branch switch: `coord_git_preflight`, and **show its warnings and advice to your user**. On `exit_code` 2 (conflict risk, or you changed files someone else locked), stop and ask your user.
+- **Only if `haiku_preflight = true`** in `.coordbot/team.toml` (`coord_git_preflight` returns `haiku_check` when it is on): after the preflight and before a push or merge, start a **Haiku** subagent with the diff and the preflight output (incoming upstream changes, overlapping files, files others locked). It checks for **lint problems** (it runs the project's linter or formatter if one is configured, otherwise it reads for obvious problems) and **possible merge problems** (textual conflicts, and clashes with incoming changes such as a renamed function that is still called). Show its findings to your user before you push. Post nothing to Discord unless your user asks.
 - Then `coord_git_notify` (`pull`, `push`, `branch` or `merge`, and the branch).
 - Commit or stash before pulling. Use `git pull --rebase`. **Never force-push.**
 - Keep commits small. Put large changes on a branch and open a pull request.
