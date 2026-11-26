@@ -13,6 +13,8 @@ This file is for you, an AI coding agent. The user may not be technical. Get coo
 
 If you have the `coord_*` tools, call `coord_setup_check` and fix what it reports, using the table in section 6. Otherwise, continue with section 2.
 
+**When you call the CLI, pass `--agent`** (or set `COORDBOT_AGENT=1`): compact plain text with no colors or separators. Use `--json` when you need to parse the output. Keep coordbot current with `coordbot update`. `coordbot haiku` shows the project's Haiku review switches; `coordbot haiku defense|preflight on|off` sets them.
+
 ## 2. Prerequisites
 
 - **uv.** Check with `uv --version`. If it is missing, show the user <https://docs.astral.sh/uv/getting-started/installation/>. On a Mac with Homebrew, `brew install uv` works.

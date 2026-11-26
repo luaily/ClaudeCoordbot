@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 import discord
 
+from . import ui
 from .config import Config
 from .db import Database
 from .ingest import ingest, ingest_many
@@ -52,12 +53,12 @@ def invite_url(application_id: int) -> str:
 
 
 def show_invite(application_id: int, reason: str, open_browser: bool = True) -> None:
-    """Print the invite link in a box the user can't miss, and try to open it."""
+    """Print the invite link where the user can't miss it, and try to open it."""
     url = invite_url(application_id)
-    line = "=" * 72
-    say(f"\n{line}\n{reason}\n\nAdd the bot to your Discord server with this link:\n\n  {url}\n")
-    say("Pick the server, click Authorize, then make sure the bot can see the coordination channel.")
-    say(f"{line}\n")
+    say(ui.lines([ui.blank(), ui.header("Invite your bot"), reason, ui.blank(),
+                  "Add the bot to your Discord server with this link:", "  " + ui.value(url), ui.blank(),
+                  "Pick the server, click Authorize, then make sure the bot can see the coordination channel.",
+                  ui.rule(), ui.blank()]))
     if open_browser:
         try:
             webbrowser.open(url)
@@ -192,7 +193,7 @@ class _ChannelOps:
                 sent += 1
             except discord.Forbidden:
                 if not getattr(self, "_ack_warned", False):
-                    say("Could not add ✅ read receipts: give the bot 'Add Reactions' in the channel.")
+                    say(ui.warn("Could not add ✅ read receipts: give the bot 'Add Reactions' in the channel."))
                     self._ack_warned = True
             except Exception:  # noqa: BLE001 - receipts are a nicety
                 continue
@@ -413,7 +414,7 @@ class GatewaySession(_ChannelOps):
         app_id = await application_id_of(client)
         channel = client.get_channel(self.cfg.channel_id)
         if channel is None:
-            say(f"Connected as {client.user}, but cannot see channel {self.cfg.channel_id}.")
+            say(ui.warn(f"Connected as {client.user}, but cannot see channel {self.cfg.channel_id}."))
             if app_id:
                 show_invite(app_id, "The bot isn't in that channel's server yet (or channel_id is wrong).")
                 self.problem = DiscordProblem(
@@ -430,12 +431,12 @@ class GatewaySession(_ChannelOps):
             recs = [to_record(m) async for m in channel.history(limit=200)]  # type: ignore[union-attr]
             ingest_many(self.db, self.cfg, recs, self.own_id)
         except discord.HTTPException as exc:
-            say(f"Could not read past messages: {explain(exc)}")
+            say(ui.warn(f"Could not read past messages: {explain(exc)}"))
             recs = []
         self._ack_task = asyncio.ensure_future(self._startup_acks(recs))
         self.db.set_meta("gateway_heartbeat", str(time.time()))
         self._start_status()
-        say(f"Online as {client.user}, watching #{getattr(channel, 'name', self.cfg.channel_id)}.")
+        say(ui.ok(f"Online as {client.user}, watching #{getattr(channel, 'name', self.cfg.channel_id)}."))
         self.ready.set()
 
     async def _startup_acks(self, recs: list[dict[str, Any]]) -> None:
@@ -443,7 +444,7 @@ class GatewaySession(_ChannelOps):
             await self.acknowledge(recs, self.db, self.cfg, self.own_id)
             await self.backfill_acks(self.db, self.cfg, self.own_id)
         except Exception as exc:  # noqa: BLE001
-            say(f"Read receipts at startup failed: {type(exc).__name__}")
+            say(ui.warn(f"Read receipts at startup failed: {type(exc).__name__}"))
 
     def _ours(self, m: discord.Message) -> bool:
         ch = m.channel
@@ -485,14 +486,14 @@ class GatewaySession(_ChannelOps):
                     await self.client.change_presence(activity=activity, status=self._presence)
                     self._status = text
                 except Exception as exc:  # noqa: BLE001 - a status is cosmetic, never crash the bot
-                    say(f"Could not set the bot status ({type(exc).__name__}); will try again later.")
+                    say(ui.warn(f"Could not set the bot status ({type(exc).__name__}); will try again later."))
                 if self.cfg.status_minutes <= 0:
                     return
                 await asyncio.sleep(self.cfg.status_minutes * 60)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            say(f"Status rotation stopped ({type(exc).__name__}).")
+            say(ui.warn(f"Status rotation stopped ({type(exc).__name__})."))
 
 
 async def run_until_idle(cfg: Config, db: Database) -> None:

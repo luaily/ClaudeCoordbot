@@ -360,6 +360,7 @@ def make_server(config_path: Path | None = None, project: Path | None = None) ->
         ready, lines = await doctor_report(hub.config_path, hub.project, own_id=own)
         if hub.session is not None and hub.session.online:
             lines.insert(0, "Discord: online.")
+        lines = [str(l) for l in lines]
         return {"ok": ready, "lines": lines}
 
     return mcp

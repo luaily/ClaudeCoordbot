@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from . import __version__
+from . import __version__, ui
 from .config import Config, ConfigError, load_config
 from .db import Database
 from .discord_client import DiscordProblem, RestSession, run_gateway
@@ -66,8 +67,8 @@ def lock_dict(lk: Lock) -> dict[str, Any]:
 
 def lock_line(lk: Lock, now: float) -> str:
     why = f' "{lk.reason}"' if lk.reason else ""
-    return f"{lk.file} - {lk.agent}{why} - since {ago(lk.ts, now)}, expires {until(lk.expires_ts, now)}"
-
+    return (f"{lk.file} - {ui.value(lk.agent)}{why} - since {ago(lk.ts, now)}, "
+            f"expires {until(lk.expires_ts, now)}")
 
 class Ctx:
     """Everything a command needs. With capture=True (MCP), output is collected instead of printed."""
@@ -191,9 +192,10 @@ def _blocked(ctx: Ctx, found: list[Lock], title: str) -> int:
         m = ctx.cfg.member_by_bot(l.author_id)
         if m and m.agent not in [o["agent"] for o in owners]:
             owners.append({"agent": m.agent, "human": m.name, "user_id": m.user_id})
-    lines = [title, *("  " + lock_line(l, now) for l in found)]
+    lines = [ui.style(title, "bold", "red"), *("  " + lock_line(l, now) for l in found)]
     if owners:
-        lines.append("Held by: " + ", ".join(f"{o['agent']} (run by {o['human'] or o['user_id']})" for o in owners)
+        lines.append("Held by: " + ", ".join(f"{ui.value(o['agent'])} (run by {o['human'] or o['user_id']})"
+                                             for o in owners)
                      + ". If your user wants to ask them, use `contact` (your user must approve the message).")
     ctx.emit({"ok": False, "conflicts": [lock_dict(l) for l in found], "holders": owners}, "\n".join(lines))
     return CONFLICT
@@ -361,7 +363,7 @@ def inbox_view(item: dict[str, Any]) -> dict[str, Any]:
 
 def inbox_text(items: list[dict[str, Any]]) -> str:
     now = time.time()
-    return "\n".join(f"  [{v['id']}] {ago(v['ts'], now)} {v['kind']} from {v['from']}"
+    return "\n".join(f"  {ui.value('[' + str(v['id']) + ']')} {ago(v['ts'], now)} {v['kind']} from {v['from']}"
                      + (f" ({v['decision']})" if v["decision"] else "") + f": {v['message']}"
                      for v in map(inbox_view, items))
 
@@ -388,8 +390,9 @@ async def cmd_link(ctx: Ctx, args: argparse.Namespace) -> int:
         raise UsageProblem("No .coordbot/team.toml here: run this inside the project folder.")
     client = getattr(ctx.session, "client", None)
     app_id = await application_id_of(client) if client is not None else ctx.own_id
-    say_ = (lambda m: None) if ctx.capture else (lambda m: print(m, file=sys.stderr))
-    say_(f"The redirect {redirect_uri(ctx.cfg.oauth_port)} must be registered on your bot's OAuth2 page.")
+    say_ = (lambda m: None) if ctx.capture else ui.say
+    say_(ui.info(f"The redirect {ui.value(redirect_uri(ctx.cfg.oauth_port))} must be registered on your "
+                 "bot's OAuth2 page."))
     try:
         user = await asyncio.to_thread(link_user, app_id, ctx.cfg.oauth_port, ctx.cfg.client_secret,
                                        args.timeout, not args.no_browser, say_)
@@ -399,9 +402,10 @@ async def cmd_link(ctx: Ctx, args: argparse.Namespace) -> int:
     member = Member(ctx.cfg.agent_name, ctx.own_id, user.id, user.name)
     changed = upsert_member(team.path, member)
     rel = team.path.relative_to(team.root) if team.path.is_relative_to(team.root) else team.path
-    text = (f"Linked {user.name} ({user.id}) to agent {member.agent} (bot {member.bot_id}). "
-            + (f"Updated {rel}: commit and push it (run preflight first) so teammates trust and can "
-               f"ping you." if changed else f"{rel} already had this link."))
+    text = ui.ok(f"Linked {ui.value(user.name)} ({user.id}) to agent {ui.value(member.agent)} "
+                 f"(bot {member.bot_id}). "
+                 + (f"Updated {ui.value(rel)}: commit and push it (run preflight first) so teammates trust and "
+                    f"can ping you." if changed else f"{ui.value(rel)} already had this link."))
     ctx.emit({"ok": True, "member": member.__dict__, "team_file": str(team.path), "changed": changed}, text)
     return OK
 
@@ -416,9 +420,12 @@ async def cmd_preflight(ctx: Ctx, args: argparse.Namespace) -> int:
     """Check for conflict risk before pulling or pushing. Show the result to your user."""
     others = [lk.file for lk in ctx.db.active_locks() if lk.author_id != ctx.own_id]
     pf = preflight(project_root(ctx), others, fetch=not args.no_fetch)
-    lines = [f"Branch {pf.branch or '?'} -> {pf.upstream or 'no upstream'}: {pf.ahead} ahead, {pf.behind} behind."]
-    lines += [f"WARNING: {w}" for w in pf.warnings] + [f"- {a}" for a in pf.advice]
-    ctx.emit({"ok": pf.ok and not pf.overlap_files and not pf.locked_by_others, **pf.to_dict()}, "\n".join(lines))
+    lines = [ui.header("Preflight"),
+             f"Branch {ui.value(pf.branch or '?')} -> {ui.value(pf.upstream or 'no upstream')}: "
+             f"{pf.ahead} ahead, {pf.behind} behind."]
+    lines += [ui.warn(w) for w in pf.warnings] + [ui.info(a) for a in pf.advice]
+    data = {"ok": pf.ok and not pf.overlap_files and not pf.locked_by_others, **pf.to_dict()}
+    ctx.emit(data, ui.lines(lines))
     return CONFLICT if (pf.overlap_files or pf.locked_by_others) else (OK if pf.ok else ERR)
 
 
@@ -437,38 +444,39 @@ async def cmd_status(ctx: Ctx, args: argparse.Namespace) -> int:
         "setup": setup_notes(ctx.cfg, ctx.own_id),
         "commits": [c.__dict__ for c in ctx.db.recent_commits(5)],
     }
-    lines = [f"Active locks ({len(locks)}):"] + [
-        "  " + lock_line(l, now) + (" [yours]" if l.author_id == ctx.own_id else "") for l in locks] or []
-    if not locks:
-        lines[0] = "Active locks: none"
-    lines.append("Recent activity:" if evs else "Recent activity: none")
+    lock_rows = ["  " + lock_line(l, now) + (ui.dim(" [yours]") if l.author_id == ctx.own_id else "") for l in locks]
+    act_rows = []
     for e in evs:
         files = json.loads(e["files"])
         extra = f" ({', '.join(files[:3])}{'...' if len(files) > 3 else ''})" if files else ""
         label = e["kind"] if e["type"] == "context" and e["kind"] else e["type"]
         if e["type"] == "git":
             label = f"git {e['action']} {e['branch'] or ''}".strip()
-        lines.append(f"  [{label}] {e['agent']} {ago(e['ts'], now)}: {e['text']}{extra}")
+        act_rows.append(f"  [{label}] {ui.value(e['agent'])} {ago(e['ts'], now)}: {e['text']}{extra}")
     await ctx.refresh_acks()
-    lines.append("Latest commits:" if commits else "Latest commits: none seen")
     commit_acks = ctx.db.acks_for([c.msg_id for c in commits if c.msg_id])
+    commit_rows = []
     for i, c in enumerate(commits):
         seen = commit_acks.get(c.msg_id, [])
         data["commits"][i]["seen_by"] = seen
-        lines.append(f"  {c.sha[:7]} {c.message} - {c.author} ({c.branch}) {ago(c.ts, now)}"
-                     + (f" (✅ {', '.join(seen)})" if seen else ""))
+        commit_rows.append(f"  {ui.value(c.sha[:7])} {c.message} - {c.author} ({c.branch}) {ago(c.ts, now)}"
+                           + (f" (✅ {', '.join(seen)})" if seen else ""))
+    parts = [ui.section("Locks", lock_rows, "none", count=True),
+             ui.section("Recent activity", act_rows), ui.section("Latest commits", commit_rows, "none seen")]
     own = ctx.db.own_actions(5)
     if own:
-        lines.append("Your recent posts (✅ = another agent's bot received it):")
         data["your_posts"] = []
+        post_rows = []
         for r in own:
             who, text = ctx.acks_line([r["msg_id"]])
             data["your_posts"].append({"type": r["type"], "summary": r["summary"], "ts": int(r["ts"]),
                                        "message_id": r["msg_id"], "seen_by": who})
-            lines.append(f"  [{r['type']}] {ago(r['ts'], now)}: {r['summary'][:80]} ({text})")
-    notes = setup_notes(ctx.cfg, ctx.own_id)
-    lines += [f"Setup: {n}" for n in notes]
-    ctx.emit(data, "\n".join(lines))
+            post_rows.append(f"  [{r['type']}] {ago(r['ts'], now)}: {r['summary'][:80]} ({text})")
+        parts.append(ui.section("Your posts (✅ = another agent's bot received it)", post_rows))
+    notes = data["setup"]
+    if notes:
+        parts.append(ui.section("Setup", [ui.warn(n) for n in notes]))
+    ctx.emit(data, ui.blocks(*parts))
     return OK
 
 
@@ -491,9 +499,9 @@ async def cmd_commits(ctx: Ctx, args: argparse.Namespace) -> int:
     await ctx.refresh_acks()
     commits = ctx.db.recent_commits(args.n)
     acks = ctx.db.acks_for([c.msg_id for c in commits if c.msg_id])
-    text = "\n".join(f"{c.sha[:7]} {c.message} - {c.author} ({c.repo}:{c.branch}) {ago(c.ts, now)}"
+    text = "\n".join(f"{ui.value(c.sha[:7])} {c.message} - {c.author} ({c.repo}:{c.branch}) {ago(c.ts, now)}"
                      + (f" (✅ {', '.join(acks[c.msg_id])})" if acks.get(c.msg_id) else "")
-                     for c in commits) or "No GitHub commits seen yet."
+                     for c in commits) or ui.info("No GitHub commits seen yet.")
     ctx.emit({"ok": True, "commits": [c.__dict__ | {"seen_by": acks.get(c.msg_id, [])} for c in commits]}, text)
     return OK
 
@@ -521,9 +529,9 @@ async def cmd_log(ctx: Ctx, args: argparse.Namespace) -> int:
              "commit": r["commit_sha"], "ts": int(r["ts"]), "message_id": r["msg_id"],
              "seen_by": acks.get(r["msg_id"], [])} for r in rows]
     now = time.time()
-    text = "\n".join(f"{ago(d['ts'], now)} [{d['type']}] {d['summary']} {', '.join(d['files'][:3])}".rstrip()
+    text = "\n".join(f"{ui.dim(ago(d['ts'], now))} [{d['type']}] {d['summary']} {', '.join(d['files'][:3])}".rstrip()
                      + (f" (✅ {', '.join(d['seen_by'])})" if d["seen_by"] else "")
-                     for d in data) or "No actions recorded yet."
+                     for d in data) or ui.info("No actions recorded yet.")
     ctx.emit({"ok": True, "actions": data}, text)
     return OK
 
@@ -539,11 +547,15 @@ HANDLERS = {"sync": cmd_sync, "plan": cmd_plan, "lock": cmd_lock, "check": cmd_c
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable JSON output")
+    common.add_argument("--agent", action="store_true", default=argparse.SUPPRESS,
+                        help="compact plain text for AI agents: no color, no separators (or set COORDBOT_AGENT=1)")
     common.add_argument("--config", type=Path, help="personal config (default: ~/.coordbot/config.toml)")
     common.add_argument("--project", type=Path, help="project folder with .coordbot/team.toml (default: here)")
 
     p = argparse.ArgumentParser(prog="coordbot", description="Coordinate AI coding agents through one Discord channel.")
     p.add_argument("--version", action="version", version=f"coordbot {__version__}")
+    p.add_argument("--agent", action="store_true",
+                   help="compact plain text for AI agents: no color, no separators (or set COORDBOT_AGENT=1)")
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
     def add(name: str, help_: str) -> argparse.ArgumentParser:
@@ -619,10 +631,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def execute(cfg: Config, db: Database, args: argparse.Namespace, session: Any = None,
                   capture: bool = False) -> tuple[int, Ctx]:
-    """Run one command. With `session` given (the MCP server's live gateway), it is reused and not closed."""
+    """Run one command. With `session` given (the MCP server's live gateway), it is reused and not closed.
+    With capture=True (MCP) the text is plain: no color, no decoration."""
+    with ui.plain() if capture else contextlib.nullcontext():
+        return await _execute(cfg, db, args, session, capture)
+
+
+async def _execute(cfg: Config, db: Database, args: argparse.Namespace, session: Any, capture: bool
+                   ) -> tuple[int, Ctx]:
     owned = session is None
     own_id = int(getattr(session, "own_id", 0) or 0)
-    warn = (lambda m: None) if capture else (lambda m: print(m, file=sys.stderr))
+    warn = (lambda m: None) if capture else (lambda m: ui.say(ui.warn(m)))
     needs_discord = args.command in POSTING or args.command == "sync"
     try:
         if args.command in LOCAL_ONLY:
@@ -640,7 +659,7 @@ async def execute(cfg: Config, db: Database, args: argparse.Namespace, session: 
                 cached = db.get_meta("own_id")
                 if needs_discord or not cached:
                     raise
-                warn(f"Warning: {exc} Showing saved data.")
+                warn(f"{exc} Showing saved data.")
                 own_id = int(cached)
         ctx = Ctx(cfg, db, session, own_id, bool(getattr(args, "json", False)), capture=capture)
         try:
@@ -648,7 +667,7 @@ async def execute(cfg: Config, db: Database, args: argparse.Namespace, session: 
         except DiscordProblem as exc:
             if needs_discord:
                 raise
-            warn(f"Warning: {exc} Showing saved data.")
+            warn(f"{exc} Showing saved data.")
             ctx.session = None
         code = await HANDLERS[args.command](ctx, args)
         if args.command != "inbox":
@@ -660,33 +679,38 @@ async def execute(cfg: Config, db: Database, args: argparse.Namespace, session: 
                     ctx.result["for_your_user"] = [inbox_view(i) for i in new]
                     ctx.text += f"\n{note}:\n" + inbox_text(new)
                 else:
-                    print(f"{note}:\n" + inbox_text(new), file=sys.stderr)
+                    ui.say(ui.warn(note) + "\n" + inbox_text(new))
         return code, ctx
     finally:
         if owned and session is not None:
             await session.close()
 
 
+def fail(msg: str, as_json: bool = False) -> int:
+    if as_json:
+        print(json.dumps({"ok": False, "error": msg}))
+    else:
+        print(ui.err(msg), file=sys.stderr)
+    return ERR
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     as_json = bool(getattr(args, "json", False))
-
-    def fail(msg: str) -> int:
-        print(json.dumps({"ok": False, "error": msg}) if as_json else f"Error: {msg}", file=sys.stderr if not as_json else sys.stdout)
-        return ERR
+    ui.configure(agent=bool(getattr(args, "agent", False)), json=as_json)
 
     if args.command == "setup":
         from .setup import run_setup
 
         return run_setup(args.config)
     if args.command == "doctor":
-        from .setup import doctor_report
+        from .setup import doctor_report, render_report
 
         ready, lines = asyncio.run(doctor_report(args.config, args.project))
         if as_json:
-            print(json.dumps({"ok": ready, "lines": lines}))
+            print(json.dumps({"ok": ready, "lines": list(lines)}))
         else:
-            print("\n".join(lines) + ("\nReady." if ready else "\nNot ready yet: fix the items above."))
+            print(render_report(ready, lines))
         return OK if ready else ERR
     if args.command == "mcp":
         from .mcp_server import serve
@@ -696,11 +720,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(args.config, args.project)
     except ConfigError as exc:
-        return fail(str(exc))
+        return fail(str(exc), as_json)
     try:
         db = Database(cfg.db_path)
     except Exception as exc:  # noqa: BLE001
-        return fail(f"Could not open the database at {cfg.db_path}: {exc}")
+        return fail(f"Could not open the database at {cfg.db_path}: {exc}", as_json)
     try:
         if args.command == "run":
             run_gateway(cfg, db)
@@ -712,9 +736,9 @@ def main(argv: list[str] | None = None) -> int:
             ensure_online(cfg, db)  # show the bot online; it idles and goes offline by itself
         return code
     except UsageProblem as exc:
-        return fail(str(exc))
+        return fail(str(exc), as_json)
     except DiscordProblem as exc:
-        return fail(str(exc))
+        return fail(str(exc), as_json)
     except KeyboardInterrupt:
         print("Stopped.")
         return OK
