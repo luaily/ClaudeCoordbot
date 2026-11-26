@@ -590,6 +590,9 @@ def build_parser() -> argparse.ArgumentParser:
         return sub.add_parser(name, parents=[common], help=help_, description=help_)
 
     add("setup", "create your personal config (~/.coordbot/config.toml) and open it")
+    s = add("update", "update coordbot to the latest version")
+    s.add_argument("--check", action="store_true", help="only report whether a newer version exists")
+    s.add_argument("--force", action="store_true", help="reinstall even if you are up to date")
     s = add("haiku", "show or set this project's Haiku review switches (written to .coordbot/team.toml)")
     s.add_argument("which", nargs="?", choices=["defense", "preflight"],
                    help="defense: Haiku defends the diff at the end of a task; preflight: Haiku checks lint and "
@@ -775,6 +778,10 @@ def main(argv: list[str] | None = None) -> int:
         from .setup import run_setup
 
         return run_setup(args.config)
+    if args.command == "update":
+        from .update import run_update
+
+        return run_update(check=args.check, force=args.force, as_json=as_json)
     if args.command == "haiku":
         return haiku_command(args, as_json)
     if args.command == "doctor":

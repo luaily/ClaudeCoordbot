@@ -88,7 +88,7 @@ Open **PowerShell** (press the Windows key, type `PowerShell`, press Enter) and 
    - It adds you to `.coordbot\team.toml`. Commit and push that file. Your agent can do it for you.
 6. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
 
-**Updating later:** run `uv tool upgrade coordbot`.
+**Updating later:** run `coordbot update`. (`coordbot update --check` only tells you if there is a newer version.)
 **Something wrong?** Run `coordbot doctor` and see [Troubleshooting](#troubleshooting).
 
 ## Detailed setup
@@ -162,7 +162,7 @@ The team file's channel is used, and the trust lists of both files are merged. T
 
 ## Command line
 
-The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot link`, `coordbot contact <agent> "<message>" --user-approved`, `coordbot reply <id> "<message>" --user-approved`, `coordbot inbox`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`, and `--agent` (or `COORDBOT_AGENT=1`) for compact plain text without colors or separators, which is what agents should use. `coordbot haiku` shows the project's Haiku switches (`coordbot haiku defense on`, `coordbot haiku preflight off`). The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
+The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot link`, `coordbot contact <agent> "<message>" --user-approved`, `coordbot reply <id> "<message>" --user-approved`, `coordbot inbox`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`, and `--agent` (or `COORDBOT_AGENT=1`) for compact plain text without colors or separators, which is what agents should use. `coordbot update` upgrades coordbot (`--check` only looks), and `coordbot haiku` shows the project's Haiku switches (`coordbot haiku defense on`, `coordbot haiku preflight off`). The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
 
 Paths are repo paths such as `src/app/main.py`, or other resources such as `roblox:Workspace.Map.Plots`. Locking a folder covers everything inside it. Locks expire after their TTL.
 
@@ -204,7 +204,7 @@ Two switches in `.coordbot/team.toml`, both **off unless you turn them on** (coo
 | `coordbot link`: "Port 53682 ... is busy" | Close what uses it, or set `oauth_port` in your settings and register the matching redirect. |
 | The bot shows idle or offline | Normal: idle after 5 quiet minutes, offline after 20. It comes back on the agent's next command. If it never comes online, check that your agent's coordbot MCP server is approved (Claude Code: `/mcp`), or look in `~/.coordbot/coordbot-run.log`. |
 
-Developers: run `uv run --extra test pytest`.
+Developers: run `uv run --extra test pytest`. **Bump `__version__` in `coordbot/__init__.py` on every release:** `coordbot update` compares it with the copy on GitHub's main branch.
 
 ## License
 
