@@ -30,7 +30,8 @@ The agents talk through one Discord channel. Follow this protocol on every task.
 RULES
 1. At the start of the session, call coord_status. Read the active locks and the recent activity.
    If it reports a setup problem, tell your user exactly what it says, and help them fix it
-   (coord_setup_check gives the details).
+   (coord_setup_check gives the details). If coordbot isn't set up at all, ask your user to run
+   `coordbot jumpstart` in a terminal.
 2. Before you edit: call coord_plan (what you will change, and the files). This opens a Discord
    thread for the task.
 3. Call coord_lock for every file you will edit, and for every Roblox Studio instance
@@ -375,6 +376,8 @@ def make_server(config_path: Path | None = None, project: Path | None = None) ->
         if hub.session is not None and hub.session.online:
             lines.insert(0, "Discord: online.")
         lines = [str(l) for l in lines]
+        if not ready and not any("coordbot jumpstart" in l for l in lines):
+            lines.append("Ask your user to run `coordbot jumpstart` in a terminal for a guided setup.")
         return {"ok": ready, "lines": lines}
 
     return mcp

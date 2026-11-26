@@ -418,13 +418,22 @@ async def cmd_link(ctx: Ctx, args: argparse.Namespace) -> int:
     say_(ui.info(f"The redirect {ui.value(redirect_uri(ctx.cfg.oauth_port))} must be registered on your "
                  "bot's OAuth2 page."))
     try:
+        from .links import interactive, offer_link
+
+        present = offer_link if (not ctx.capture and not args.no_browser and interactive()) else None
         user = await asyncio.to_thread(link_user, app_id, ctx.cfg.oauth_port, ctx.cfg.client_secret,
-                                       args.timeout, not args.no_browser, say_)
+                                       args.timeout, not args.no_browser, say_, present)
     except LinkProblem as exc:
         hint = setup_hint(app_id, ctx.cfg.oauth_port)
         raise UsageProblem(f"{exc}\nIf Discord said the redirect is invalid: {hint}") from None
     member = Member(ctx.cfg.agent_name, ctx.own_id, user.id, user.name)
     changed = upsert_member(team.path, member)
+    try:  # remembered in the personal settings, so `coordbot jumpstart` knows you are verified
+        from .jumpstart import write_settings
+
+        write_settings(ctx.cfg.config_path, linked_user_id=user.id, linked_user_name=user.name)
+    except Exception:  # noqa: BLE001 - the team link above is what matters
+        pass
     rel = team.path.relative_to(team.root) if team.path.is_relative_to(team.root) else team.path
     text = ui.ok(f"Linked {ui.value(user.name)} ({user.id}) to agent {ui.value(member.agent)} "
                  f"(bot {member.bot_id}). "
@@ -589,6 +598,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add(name: str, help_: str) -> argparse.ArgumentParser:
         return sub.add_parser(name, parents=[common], help=help_, description=help_)
 
+    add("jumpstart", "guided setup: bot, token, Discord account, working directory and .coordbot, invite (interactive)")
     add("setup", "create your personal config (~/.coordbot/config.toml) and open it")
     s = add("update", "update coordbot to the latest version")
     s.add_argument("--check", action="store_true", help="only report whether a newer version exists")
@@ -778,6 +788,12 @@ def main(argv: list[str] | None = None) -> int:
         from .setup import run_setup
 
         return run_setup(args.config)
+    if args.command == "jumpstart":
+        if ui.is_agent():
+            return fail("jumpstart is interactive; ask your user to run `coordbot jumpstart` in a terminal.", as_json)
+        from .jumpstart import run_jumpstart
+
+        return run_jumpstart(args.config, args.project)
     if args.command == "update":
         from .update import run_update
 

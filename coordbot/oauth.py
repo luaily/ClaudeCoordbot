@@ -20,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -109,7 +110,8 @@ _PAGE = ("<!doctype html><meta charset=utf-8><title>coordbot</title>"
          "<body style='font-family:system-ui;max-width:32rem;margin:4rem auto'><h2>{title}</h2><p>{body}</p>")
 
 
-def _wait_for_code(port: int, state: str, timeout: float) -> str:
+def _callback_server(port: int, state: str) -> tuple[HTTPServer, dict[str, str], threading.Event]:
+    """Listen on 127.0.0.1:<port> for Discord's redirect (before the user ever sees the login link)."""
     result: dict[str, str] = {}
     done = threading.Event()
 
@@ -144,6 +146,10 @@ def _wait_for_code(port: int, state: str, timeout: float) -> str:
         raise LinkProblem(f"Port {port} on 127.0.0.1 is busy ({exc.strerror}). Close what uses it, or set "
                           "oauth_port in your personal settings (and register the matching redirect).") from None
     server.timeout = 1
+    return server, result, done
+
+
+def _wait_for_code(server: HTTPServer, result: dict[str, str], done: threading.Event, timeout: float) -> str:
     try:
         while not done.is_set() and timeout > 0:
             server.handle_request()
@@ -156,18 +162,28 @@ def _wait_for_code(port: int, state: str, timeout: float) -> str:
 
 
 def link_user(app_id: int, port: int, client_secret: str = "", timeout: float = 300,
-              open_browser: bool = True, show: callable = print) -> DiscordUser:  # type: ignore[valid-type]
-    """Run the whole browser login. Blocks until done or `timeout` seconds pass."""
+              open_browser: bool = True, show: Callable[[str], None] = print,
+              present: Callable[[str], object] | None = None) -> DiscordUser:
+    """Run the whole browser login. Blocks until done or `timeout` seconds pass.
+    `present` (an interactive terminal) shows the login link itself instead of `show` + auto-open."""
     state = secrets.token_urlsafe(24)
     verifier, challenge = pkce_pair()
     url = authorize_url(app_id, port, state, challenge)
-    show(f"Opening Discord to link your account. If no browser opens, visit:\n{url}")
-    if open_browser:
-        try:
-            webbrowser.open(url)
-        except Exception:  # noqa: BLE001
-            pass
-    code = _wait_for_code(port, state, timeout)
+    server, result, done = _callback_server(port, state)  # listening before the link is shown
+    try:
+        if present is not None:
+            present(url)
+        else:
+            show(f"Opening Discord to link your account. If no browser opens, visit:\n{url}")
+            if open_browser:
+                try:
+                    webbrowser.open(url)
+                except Exception:  # noqa: BLE001
+                    pass
+    except BaseException:
+        server.server_close()
+        raise
+    code = _wait_for_code(server, result, done, timeout)
     return fetch_me(exchange(app_id, port, code, verifier, client_secret))
 
 

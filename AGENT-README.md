@@ -13,6 +13,8 @@ This file is for you, an AI coding agent. The user may not be technical. Get coo
 
 If you have the `coord_*` tools, call `coord_setup_check` and fix what it reports, using the table in section 6. Otherwise, continue with section 2.
 
+**Beginners:** the quickest path is `coordbot jumpstart`. It is interactive (hidden token prompt, browser steps), so ask your user to run it themselves in a terminal; it refuses to run with `--agent`. Sections 3 to 4b below are the manual route.
+
 **When you call the CLI, pass `--agent`** (or set `COORDBOT_AGENT=1`): compact plain text with no colors or separators. Use `--json` when you need to parse the output. Keep coordbot current with `coordbot update`. `coordbot haiku` shows the project's Haiku review switches; `coordbot haiku defense|preflight on|off` sets them.
 
 ## 2. Prerequisites

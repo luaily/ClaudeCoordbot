@@ -18,7 +18,7 @@ Free software under the [GNU AGPL v3 or later](LICENSE).
 
 ## Quickstart
 
-You need a Discord account and about 10 minutes. You also need a project that already uses coordbot (it has a `.coordbot` folder). If it doesn't, see [Adding coordbot to a new project](#adding-coordbot-to-a-new-project-one-person-once) first.
+You need a Discord account and about 10 minutes. After installing coordbot, `coordbot jumpstart` walks you through everything else. If your project doesn't have a `.coordbot` folder yet, jumpstart offers to create one (with the channel id and whether coordbot is required).
 
 ### Make your Discord bot (same on every computer)
 
@@ -39,23 +39,11 @@ Open the **Terminal** app and do these steps one at a time.
    ```
    uv tool install git+https://github.com/luaily/ClaudeCoordbot
    ```
-3. Create your settings:
+3. Run the guided setup. It saves your bot's token, verifies your Discord account, then asks for your working directory (the git repo you already run your AI agent in; you can also add it later), finds or creates its `.coordbot` folder, and invites the bot. Links show `[C] copy  [Enter] open in browser`. You can stop and run it again any time: it continues where you left off.
    ```
-   coordbot setup
+   coordbot jumpstart
    ```
-   A text file opens. Paste your bot token between the quotes after `bot_token =`. Type a short name after `agent_name =`, like `"alice-agent"`. Save and close the file.
-4. Go to your project folder and check everything. Replace the path with your own:
-   ```
-   cd ~/path/to/your/project
-   coordbot doctor
-   ```
-   - If it says the bot can't see the channel, open the **invite link** it prints, pick your server and click **Authorize**. Then run `coordbot doctor` again.
-   - It prints **your bot's id**. Send that number to the project owner, or add it to `trusted_user_ids` in `.coordbot/team.toml` yourself.
-5. Link your Discord account, so teammates' agents can reach you:
-   - On your bot's page in the Developer Portal, click **OAuth2**. Under **Redirects**, click **Add Redirect**, paste `http://127.0.0.1:53682/callback`, and click **Save Changes**.
-   - Run `coordbot link`. Your browser opens Discord. Click **Authorize**.
-   - It adds you to `.coordbot/team.toml`. Commit and push that file. Your agent can do it for you.
-6. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
+4. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
 
 ### Windows
 
@@ -70,28 +58,18 @@ Open **PowerShell** (press the Windows key, type `PowerShell`, press Enter) and 
    ```
    uv tool install git+https://github.com/luaily/ClaudeCoordbot
    ```
-3. Create your settings:
+3. Run the guided setup. It saves your bot's token, verifies your Discord account, then asks for your working directory (the git repo you already run your AI agent in; you can also add it later), finds or creates its `.coordbot` folder, and invites the bot. Links show `[C] copy  [Enter] open in browser`. You can stop and run it again any time: it continues where you left off.
    ```
-   coordbot setup
+   coordbot jumpstart
    ```
-   A text file opens. Paste your bot token between the quotes after `bot_token =`. Type a short name after `agent_name =`, like `"alice-agent"`. Save and close the file.
-4. Go to your project folder and check everything. Replace the path with your own:
-   ```
-   cd C:\path\to\your\project
-   coordbot doctor
-   ```
-   - If it says the bot can't see the channel, open the **invite link** it prints, pick your server and click **Authorize**. Then run `coordbot doctor` again.
-   - It prints **your bot's id**. Send that number to the project owner, or add it to `trusted_user_ids` in `.coordbot\team.toml` yourself.
-5. Link your Discord account, so teammates' agents can reach you:
-   - On your bot's page in the Developer Portal, click **OAuth2**. Under **Redirects**, click **Add Redirect**, paste `http://127.0.0.1:53682/callback`, and click **Save Changes**.
-   - Run `coordbot link`. Your browser opens Discord. Click **Authorize**.
-   - It adds you to `.coordbot\team.toml`. Commit and push that file. Your agent can do it for you.
-6. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
+4. Start Claude Code in your project folder. When it asks about the **coordbot** MCP server, say **yes**. That's it.
 
 **Updating later:** run `coordbot update`. (`coordbot update --check` only tells you if there is a newer version.)
 **Something wrong?** Run `coordbot doctor` and see [Troubleshooting](#troubleshooting).
 
 ## Detailed setup
+
+This is what `coordbot jumpstart` does for you, step by step.
 
 You need [uv](https://docs.astral.sh/uv/getting-started/installation/) (it installs Python for you), a Discord server with a coordination channel, and about 10 minutes.
 
@@ -162,7 +140,7 @@ The team file's channel is used, and the trust lists of both files are merged. T
 
 ## Command line
 
-The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot link`, `coordbot contact <agent> "<message>" --user-approved`, `coordbot reply <id> "<message>" --user-approved`, `coordbot inbox`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`, and `--agent` (or `COORDBOT_AGENT=1`) for compact plain text without colors or separators, which is what agents should use. `coordbot update` upgrades coordbot (`--check` only looks), and `coordbot haiku` shows the project's Haiku switches (`coordbot haiku defense on`, `coordbot haiku preflight off`). The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
+The same commands work in a terminal: `coordbot status`, `coordbot lock <files> --reason "..."`, `coordbot done "<summary>" --files ... --commit <sha>`, `coordbot context "<message>"`, `coordbot git push main`, `coordbot preflight`, `coordbot link`, `coordbot contact <agent> "<message>" --user-approved`, `coordbot reply <id> "<message>" --user-approved`, `coordbot inbox`, `coordbot doctor`, `coordbot setup`, and `coordbot run`, which keeps the bot online. All commands accept `--json`, and `--agent` (or `COORDBOT_AGENT=1`) for compact plain text without colors or separators, which is what agents should use. `coordbot jumpstart` is the guided first-time setup, `coordbot update` upgrades coordbot (`--check` only looks), and `coordbot haiku` shows the project's Haiku switches (`coordbot haiku defense on`, `coordbot haiku preflight off`). The exit codes are 0 for fine, 1 for an error and 2 for a conflict. Install the command with `uv tool install git+https://github.com/luaily/ClaudeCoordbot`, or use `./coord` and `coord.bat` from a clone.
 
 Paths are repo paths such as `src/app/main.py`, or other resources such as `roblox:Workspace.Map.Plots`. Locking a folder covers everything inside it. Locks expire after their TTL.
 

@@ -68,6 +68,7 @@ def run_setup(path: Path | None = None) -> int:
         print(ui.ok(f"Created {ui.value(path)}"))
     print("Opening it now. Paste your bot token and pick an agent_name, then save.")
     print(ui.warn("NEVER share or commit this file: it holds your bot's secret token."))
+    print(ui.dim("Tip: `coordbot jumpstart` walks you through all of this."))
     _open_in_editor(path)
     return 0
 
@@ -96,8 +97,9 @@ async def doctor_report(config_path: Path | None = None, project: Path | None = 
         lines += [Line(n, "warn") for n in haiku_notes(team)]
     if not path.is_file():
         install = team.install if team else "https://github.com/luaily/ClaudeCoordbot"
-        return False, lines + [Line(f"No personal settings at {path}. Run `coordbot setup`, paste your bot token "
-                                    f"and agent_name. Install guide: {install}", "err")]
+        return False, lines + [Line(f"No personal settings at {path}. Run `coordbot jumpstart` (or "
+                                    f"`coordbot setup`) and paste your bot token and agent_name. "
+                                    f"Install guide: {install}", "err")]
     try:
         cfg = load_config(path, project)
     except ConfigError as exc:
